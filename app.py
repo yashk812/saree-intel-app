@@ -323,11 +323,11 @@ elif page == "🔍 Expansion Insights":
         |-----------|---------|
         | **Competitor Presence** | Count of all non-Kalyan Silks stores in that city |
         | **Kalyan Silks Presence** | Count of Kalyan Silks stores in that city |
-        | **Adjacency Bonus** | Kalyan Silks stores within chosen radius (outside this city), capped at max |
+        | **Adjacency Bonus** | Distinct Kalyan Silks cities within chosen radius (outside this city), capped at max |
         | **Opportunity Score** | `(Competitor Presence × 10) − (Kalyan Silks Presence × 20) + (Adjacency Bonus × 5)` |
 
         **High score** = lots of competitor activity, little/no Kalyan Silks footprint.
-        **Adjacency bonus** surfaces cities near existing Kalyan Silks stores — logical expansion steps.
+        **Adjacency bonus** surfaces cities near existing Kalyan Silks cities — logical expansion steps. One point per nearby Kalyan city (not per store).
         """)
 
     col_f1, col_f2, col_f3, col_f4 = st.columns([2, 1, 1, 1])
@@ -356,17 +356,17 @@ elif page == "🔍 Expansion Insights":
         city_kalyan.set_index("City_lower")["Kalyan Silks Stores"]
     ).fillna(0).astype(int)
 
-    # Haversine adjacency bonus
-    kalyan_coords = kalyan.groupby("City")[["lat", "lng"]].mean()
+    # Haversine adjacency bonus — one point per nearby Kalyan CITY (not per store)
+    kalyan_city_coords = kalyan.groupby("City")[["lat", "lng"]].mean().reset_index()
 
     def adjacency_bonus(city_row):
-        """Count Kalyan Silks stores within radius_km of this city, capped at adj_cap."""
+        """Count distinct Kalyan Silks cities within radius_km, capped at adj_cap."""
         city_coords_row = idf[idf["City"] == city_row["City"]][["lat", "lng"]].mean()
         if pd.isna(city_coords_row["lat"]):
             return 0
         clat, clng = np.radians(city_coords_row["lat"]), np.radians(city_coords_row["lng"])
         bonus = 0
-        for _, kr in kalyan.iterrows():
+        for _, kr in kalyan_city_coords.iterrows():
             if kr["City"].lower() == city_row["City"].lower():
                 continue
             klat, klng = np.radians(kr["lat"]), np.radians(kr["lng"])
