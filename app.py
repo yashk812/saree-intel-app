@@ -453,6 +453,10 @@ elif page == "🔍 Expansion Insights":
         ).add_to(m2)
 
     city_coords_map = idf.groupby("City")[["lat","lng"]].mean().to_dict("index")
+
+    # Pre-compute top pincodes per city from competitor data
+    comp_pincode = competitors.groupby(["City", "Pincode"]).size().reset_index(name="stores")
+
     for _, row in white_space.iterrows():
         city = row["City"]
         if city not in city_coords_map:
@@ -461,6 +465,19 @@ elif page == "🔍 Expansion Insights":
         clng = city_coords_map[city]["lng"]
         score = row["Opportunity Score"]
         radius = max(6, min(22, score / 4))
+
+        # Top 5 pincodes in this city by competitor store count
+        city_pins = comp_pincode[comp_pincode["City"] == city].sort_values("stores", ascending=False).head(5)
+        pin_rows = "".join(
+            f"<tr><td style='padding:2px 8px 2px 0;color:#ccc'>{p['Pincode']}</td>"
+            f"<td style='padding:2px 0;color:#f5c842;font-weight:600'>{p['stores']} store{'s' if p['stores']>1 else ''}</td></tr>"
+            for _, p in city_pins.iterrows()
+        )
+        pin_html = (
+            f"<br><div style='margin-top:6px;font-size:11px;color:#aaa'>Top pincodes (by competitor density):</div>"
+            f"<table style='margin-top:3px;font-size:12px'>{pin_rows}</table>"
+        ) if not city_pins.empty else ""
+
         folium.CircleMarker(
             location=[clat, clng],
             radius=radius,
@@ -468,12 +485,14 @@ elif page == "🔍 Expansion Insights":
             fill_opacity=0.55, weight=1,
             tooltip=f"🎯 {city} — score {score}",
             popup=folium.Popup(
-                f"<b style='color:#e63946'>{city}</b>, {row['State']}<br>"
+                f"<div style='font-family:sans-serif;min-width:200px'>"
+                f"<b style='color:#e63946;font-size:14px'>{city}</b>, {row['State']}<br><br>"
                 f"Competitor stores: <b>{row['Competitor Stores']}</b><br>"
                 f"Kalyan Silks stores: <b>{row['Kalyan Silks Stores']}</b><br>"
                 f"Adjacency bonus: <b>{row['Adjacency Bonus']}</b><br>"
-                f"Opportunity score: <b>{score}</b>",
-                max_width=260
+                f"Opportunity score: <b>{score}</b>"
+                f"{pin_html}</div>",
+                max_width=280
             )
         ).add_to(m2)
 
