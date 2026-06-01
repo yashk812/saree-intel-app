@@ -314,51 +314,92 @@ elif page == "🔍 Expansion Insights":
     st.markdown('<div class="page-title">🔍 Expansion Insights</div>', unsafe_allow_html=True)
     st.markdown('<div class="page-sub">Cities where competitors operate but Kalyan Silks has no presence — ranked by opportunity.</div>', unsafe_allow_html=True)
 
-    col_f1, col_f2 = st.columns([2, 1])
+    # Score explainer
+    with st.expander("🧮 How the Opportunity Score works", expanded=False):
+        st.markdown("""
+        For each **city**, we calculate:
+
+        | Component | Formula |
+        |-----------|---------|
+        | **Competitor Presence** | Count of all non-Kalyan Silks stores in that city |
+        | **Kalyan Silks Presence** | Count of Kalyan Silks stores in that city |
+        | **Adjacency Bonus** | Kalyan Silks stores within chosen radius (outside this city), capped at max |
+        | **Opportunity Score** | `(Competitor Presence × 10) − (Kalyan Silks Presence × 20) + (Adjacency Bonus × 5)` |
+
+        **High score** = lots of competitor activity, little/no Kalyan Silks footprint.
+        **Adjacency bonus** surfaces cities near existing Kalyan Silks stores — logical expansion steps.
+        """)
+
+    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 1, 1, 1])
     with col_f1:
         sel_states3 = st.multiselect("Filter States", FOCUS_STATES, placeholder="All states", key="ins_state")
     with col_f2:
-        top_n = st.slider("Show top N cities", 5, 40, 20)
+        top_n = st.slider("Top N cities", 5, 40, 20)
+    with col_f3:
+        radius_km = st.slider("Adjacency radius (km)", 25, 300, 100, step=25)
+    with col_f4:
+        adj_cap = st.slider("Adjacency cap", 1, 10, 5)
 
     idf = df_india[df_india["State"].isin(sel_states3)] if sel_states3 else df_india.copy()
 
-    kalyan = idf[idf["Company Name"] == "Kalyan Silks"]
-    competitors = idf[idf["Company Name"] != "Kalyan Silks"]
-
+    kalyan = idf[idf["Company Name"] == "Kalyan Silks"].copy()
+    competitors = idf[idf["Company Name"] != "Kalyan Silks"].copy()
     kalyan_cities = set(kalyan["City"].str.lower().unique())
 
-    # Score by city: competitor store count
-    city_comp = competitors.groupby(["City", "State"]).size().reset_index(name="competitor_stores")
-    city_kalyan = kalyan.groupby("City").size().reset_index(name="kalyan_stores")
+    # Build city-level score table
+    city_comp = competitors.groupby(["City", "State"]).size().reset_index(name="Competitor Stores")
+    city_kalyan = kalyan.groupby("City").size().reset_index(name="Kalyan Silks Stores")
     city_kalyan["City_lower"] = city_kalyan["City"].str.lower()
 
     city_comp["has_kalyan"] = city_comp["City"].str.lower().isin(kalyan_cities)
-    city_comp["kalyan_stores"] = city_comp["City"].str.lower().map(
-        city_kalyan.set_index("City_lower")["kalyan_stores"]
+    city_comp["Kalyan Silks Stores"] = city_comp["City"].str.lower().map(
+        city_kalyan.set_index("City_lower")["Kalyan Silks Stores"]
     ).fillna(0).astype(int)
 
-    # Opportunity score = competitor_stores * 10 - kalyan_stores * 20
-    city_comp["opportunity_score"] = city_comp["competitor_stores"] * 10 - city_comp["kalyan_stores"] * 20
-    city_comp = city_comp.sort_values("opportunity_score", ascending=False)
+    # Haversine adjacency bonus
+    kalyan_coords = kalyan.groupby("City")[["lat", "lng"]].mean()
 
-    # Split: white space (no kalyan) vs contested
+    def adjacency_bonus(city_row):
+        """Count Kalyan Silks stores within radius_km of this city, capped at adj_cap."""
+        city_coords_row = idf[idf["City"] == city_row["City"]][["lat", "lng"]].mean()
+        if pd.isna(city_coords_row["lat"]):
+            return 0
+        clat, clng = np.radians(city_coords_row["lat"]), np.radians(city_coords_row["lng"])
+        bonus = 0
+        for _, kr in kalyan.iterrows():
+            if kr["City"].lower() == city_row["City"].lower():
+                continue
+            klat, klng = np.radians(kr["lat"]), np.radians(kr["lng"])
+            dlat, dlng = klat - clat, klng - clng
+            a = np.sin(dlat/2)**2 + np.cos(clat) * np.cos(klat) * np.sin(dlng/2)**2
+            dist = 6371 * 2 * np.arcsin(np.sqrt(a))
+            if dist <= radius_km:
+                bonus += 1
+        return min(bonus, adj_cap)
+
+    city_comp["Adjacency Bonus"] = city_comp.apply(adjacency_bonus, axis=1)
+    city_comp["Opportunity Score"] = (
+        city_comp["Competitor Stores"] * 10
+        - city_comp["Kalyan Silks Stores"] * 20
+        + city_comp["Adjacency Bonus"] * 5
+    )
+    city_comp = city_comp.sort_values("Opportunity Score", ascending=False)
+
     white_space = city_comp[~city_comp["has_kalyan"]].head(top_n).copy()
-    contested = city_comp[city_comp["has_kalyan"]].head(10).copy()
 
+    # ── Charts row ─────────────────────────────────────────────────────────────
     col_ins1, col_ins2 = st.columns([3, 2])
 
     with col_ins1:
-        st.markdown("#### 🟡 White Space Cities (no Kalyan Silks presence)")
+        st.markdown("#### 🟡 White Space Cities")
         if len(white_space) == 0:
             st.info("No white-space cities found for selected filters.")
         else:
             fig_opp = px.bar(
-                white_space,
-                x="opportunity_score", y="City",
-                orientation="h",
-                color="State",
+                white_space, x="Opportunity Score", y="City",
+                orientation="h", color="State",
                 title=f"Top {top_n} Opportunity Cities",
-                hover_data=["competitor_stores", "State"]
+                hover_data=["Competitor Stores", "Adjacency Bonus", "State"]
             )
             fig_opp.update_layout(
                 paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
@@ -390,11 +431,15 @@ elif page == "🔍 Expansion Insights":
             )
             st.plotly_chart(fig_bd, use_container_width=True)
 
-    # Map
+    # ── Detailed table ─────────────────────────────────────────────────────────
+    st.markdown("#### 📋 Detailed opportunity table")
+    disp = white_space[["City", "State", "Competitor Stores", "Kalyan Silks Stores", "Adjacency Bonus", "Opportunity Score"]].copy()
+    st.dataframe(disp.reset_index(drop=True), use_container_width=True, height=350)
+
+    # ── Map ────────────────────────────────────────────────────────────────────
     st.markdown("#### 🗺️ Opportunity map")
     m2 = folium.Map(location=[15.0, 79.0], zoom_start=6, tiles="CartoDB dark_matter")
 
-    # Plot existing Kalyan Silks stores
     for _, row in kalyan.iterrows():
         folium.CircleMarker(
             location=[row["lat"], row["lng"]],
@@ -402,12 +447,11 @@ elif page == "🔍 Expansion Insights":
             fill_opacity=0.9, weight=2,
             tooltip=f"✅ {row['Store Name']}",
             popup=folium.Popup(
-                f"<b style='color:#f5c842'>{row['Store Name']}</b><br>📍 {row['City']}, {row['State']} - {row['Pincode']}",
+                f"<b style='color:#f5c842'>{row['Store Name']}</b><br>📍 {row['City']}, {row['State']} — {row['Pincode']}",
                 max_width=250
             )
         ).add_to(m2)
 
-    # Plot opportunity cities
     city_coords_map = idf.groupby("City")[["lat","lng"]].mean().to_dict("index")
     for _, row in white_space.iterrows():
         city = row["City"]
@@ -415,37 +459,32 @@ elif page == "🔍 Expansion Insights":
             continue
         clat = city_coords_map[city]["lat"]
         clng = city_coords_map[city]["lng"]
-        score = row["opportunity_score"]
-        radius = max(6, min(20, score / 5))
+        score = row["Opportunity Score"]
+        radius = max(6, min(22, score / 4))
         folium.CircleMarker(
             location=[clat, clng],
             radius=radius,
             color="#e63946", fill=True, fill_color="#e63946",
-            fill_opacity=0.5, weight=1,
-            tooltip=f"🎯 {city} — {row['competitor_stores']} competitor stores",
+            fill_opacity=0.55, weight=1,
+            tooltip=f"🎯 {city} — score {score}",
             popup=folium.Popup(
                 f"<b style='color:#e63946'>{city}</b>, {row['State']}<br>"
-                f"Competitor stores: <b>{row['competitor_stores']}</b><br>"
+                f"Competitor stores: <b>{row['Competitor Stores']}</b><br>"
+                f"Kalyan Silks stores: <b>{row['Kalyan Silks Stores']}</b><br>"
+                f"Adjacency bonus: <b>{row['Adjacency Bonus']}</b><br>"
                 f"Opportunity score: <b>{score}</b>",
-                max_width=250
+                max_width=260
             )
         ).add_to(m2)
 
-    # Legend
     m2.get_root().html.add_child(folium.Element("""
     <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e1e2e;
                 border:1px solid #333;border-radius:8px;padding:12px 16px;font-family:sans-serif">
       <div style="margin:4px 0"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#f5c842;margin-right:8px"></span><span style="color:#ddd;font-size:12px">Kalyan Silks (existing)</span></div>
-      <div style="margin:4px 0"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#e63946;margin-right:8px"></span><span style="color:#ddd;font-size:12px">Opportunity cities</span></div>
+      <div style="margin:4px 0"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#e63946;margin-right:8px"></span><span style="color:#ddd;font-size:12px">Opportunity cities (size = score)</span></div>
     </div>"""))
 
     st_folium(m2, width="100%", height=550, returned_objects=[])
-
-    # Table
-    st.markdown("#### Detailed opportunity table")
-    disp = white_space[["City", "State", "competitor_stores", "opportunity_score"]].copy()
-    disp.columns = ["City", "State", "Competitor Stores", "Opportunity Score"]
-    st.dataframe(disp.reset_index(drop=True), use_container_width=True, height=350)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
