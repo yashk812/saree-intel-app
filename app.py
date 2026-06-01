@@ -258,25 +258,49 @@ elif page == "📊 Company Stats":
         )
         st.plotly_chart(fig2, use_container_width=True)
 
-    # City-level heatmap table
+    # City-level heatmap — primary vs compare
     st.markdown("#### City-level presence heatmap")
-    city_pivot = sdf.groupby(["City", "Company Name"]).size().unstack(fill_value=0)
-    city_pivot["Total"] = city_pivot.sum(axis=1)
-    city_pivot = city_pivot.sort_values("Total", ascending=False).head(30)
+    all_companies = list(COMPANY_COLORS.keys())
 
+    hm_col1, hm_col2, hm_col3 = st.columns([1, 2, 1])
+    with hm_col1:
+        primary_co = st.selectbox("Primary company", all_companies, index=0, key="hm_primary")
+    with hm_col2:
+        default_compare = [c for c in all_companies if c != primary_co]
+        compare_cos = st.multiselect("Compare against", [c for c in all_companies if c != primary_co],
+                                     default=default_compare, key="hm_compare")
+    with hm_col3:
+        top_n_hm = st.slider("Top N cities", 5, 50, 30, key="hm_topn")
+
+    selected_cos = [primary_co] + [c for c in compare_cos if c != primary_co]
+    city_pivot = (
+        sdf[sdf["Company Name"].isin(selected_cos)]
+        .groupby(["City", "Company Name"]).size()
+        .unstack(fill_value=0)
+        .reindex(columns=selected_cos, fill_value=0)
+    )
+    city_pivot = city_pivot.sort_values(primary_co, ascending=False).head(top_n_hm)
+
+    z_vals = city_pivot.values
+    text_vals = [[str(v) if v > 0 else "" for v in row] for row in z_vals]
+
+    primary_color = COMPANY_COLORS.get(primary_co, "#f5c842")
     fig3 = go.Figure(data=go.Heatmap(
-        z=city_pivot.drop("Total", axis=1).values,
-        x=city_pivot.drop("Total", axis=1).columns.tolist(),
+        z=z_vals,
+        x=city_pivot.columns.tolist(),
         y=city_pivot.index.tolist(),
-        colorscale=[[0, "#1e1e2e"], [0.33, "#2a2a4a"], [0.66, "#e6a020"], [1, "#f5c842"]],
+        text=text_vals,
+        texttemplate="%{text}",
+        textfont=dict(size=11, color="white"),
+        colorscale=[[0, "#1e1e2e"], [0.01, "#1e1e2e"], [0.33, "#2a2a4a"], [0.66, "#e6a020"], [1, primary_color]],
         showscale=True,
-        hoverongaps=False
+        hoverongaps=False,
     ))
     fig3.update_layout(
         paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
         font_color="#ccc", title_font_color="#f5c842",
-        title="Top 30 Cities — Store Count by Company",
-        height=500,
+        title=f"Top {top_n_hm} Cities — {primary_co} vs selected companies",
+        height=max(400, top_n_hm * 18),
         margin=dict(l=10, r=10, t=40, b=10),
         xaxis=dict(side="top")
     )
