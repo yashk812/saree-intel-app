@@ -301,7 +301,7 @@ elif page == "📊 Company Stats":
         font_color="#ccc", title_font_color="#f5c842",
         title=f"Top {top_n_hm} Cities — {primary_co} vs selected companies",
         height=max(400, top_n_hm * 18),
-        margin=dict(l=10, r=10, t=40, b=10),
+        margin=dict(l=10, r=10, t=80, b=10),
         xaxis=dict(side="top")
     )
     st.plotly_chart(fig3, use_container_width=True)
