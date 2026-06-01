@@ -434,6 +434,14 @@ elif page == "🔍 Expansion Insights":
     # ── Detailed table ─────────────────────────────────────────────────────────
     st.markdown("#### 📋 Detailed opportunity table")
     disp = white_space[["City", "State", "Competitor Stores", "Kalyan Silks Stores", "Adjacency Bonus", "Opportunity Score"]].copy()
+
+    # Add top 3 pincodes column
+    comp_pincode = competitors.groupby(["City", "Pincode"]).size().reset_index(name="n")
+    def top_pins(city):
+        pins = comp_pincode[comp_pincode["City"] == city].sort_values("n", ascending=False).head(3)
+        return ", ".join(f"{r['Pincode']} ({r['n']})" for _, r in pins.iterrows())
+    disp["Top Pincodes (competitor count)"] = disp["City"].apply(top_pins)
+
     st.dataframe(disp.reset_index(drop=True), use_container_width=True, height=350)
 
     # ── Map ────────────────────────────────────────────────────────────────────
