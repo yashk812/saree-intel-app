@@ -328,8 +328,9 @@ elif page == "🔍 Expansion Insights":
         pop_2026       = ("pop_2026", "first"),
         lat            = ("lat", "mean"),
         lng            = ("lng", "mean"),
-        district       = ("District", lambda x: x.mode()[0] if len(x) > 0 else ""),
     ).reset_index()
+    city_district = df_india.groupby(["City","State"])["District"].agg(lambda x: x.mode().iloc[0] if len(x) > 0 else "").reset_index()
+    city_agg = city_agg.merge(city_district, on=["City","State"], how="left")
 
     comp_stores = df_india[df_india["Company Name"] != "Kalyan Silks"].groupby(["City","State"]).size().reset_index(name="competitor_stores")
     comp_names  = df_india[df_india["Company Name"] != "Kalyan Silks"].groupby(["City","State"])["Company Name"].apply(
@@ -486,7 +487,7 @@ elif page == "🔍 Expansion Insights":
         # Table
         st.subheader(f"📋 City Opportunities ({len(idf_city)} shown)")
         display_cols = {
-            "City":"City", "State":"State", "district":"District", "tier":"Tier",
+            "City":"City", "State":"State", "District":"District", "tier":"Tier",
             "kalyan_stores_to_open":"Kalyan Stores to Open",
             "gap_stores":"Total Gap", "kalyan_share_pct":"Kalyan Share %",
             "kalyan_stores":"Kalyan Stores (now)", "total_stores":"Total Stores",
