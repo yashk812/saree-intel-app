@@ -148,7 +148,7 @@ if page == "🗺️ Store Map":
     center_lng = mdf["lng"].mean() if len(mdf) else 79.0
 
     m = folium.Map(location=[center_lat, center_lng], zoom_start=zoom,
-                   tiles="CartoDB dark_matter", control_scale=True)
+                   tiles="CartoDB positron", control_scale=True)
     mc = MarkerCluster(options={"maxClusterRadius": 40, "spiderfyOnMaxZoom": True})
 
     for _, row in mdf.iterrows():
@@ -534,7 +534,7 @@ elif page == "🔍 Expansion Insights":
 
         if not map_df.empty:
             m2 = folium.Map(location=[map_df["lat"].mean(), map_df["lng"].mean()],
-                            zoom_start=5, tiles="CartoDB dark_matter")
+                            zoom_start=5, tiles="CartoDB positron")
             max_val = max(map_df["kalyan_stores_to_open"].max(), 1)
             tier_color = {"P0 (Kalyan present)":"#f5c842","P1 (<100km)":"#e63946",
                           "P2 (100-200km)":"#FF9800","P3 (>200km)":"#9E9E9E"}
@@ -959,7 +959,7 @@ Keep total response under 450 words."""
         center_lat  = city_stores["lat"].mean() if not city_stores.empty else 15.0
         center_lng  = city_stores["lng"].mean() if not city_stores.empty else 79.0
 
-        m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="CartoDB dark_matter")
+        m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="CartoDB positron")
 
         # All competitors — same neutral grey (colour is in bar chart, not map)
         for _, row in data["comp_df"].dropna(subset=["lat","lng"]).iterrows():
