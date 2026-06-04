@@ -715,7 +715,7 @@ elif page == "🔍 Expansion Insights":
 elif page == "🔍 City Explorer":
     import math, requests as req_lib
 
-    GOOGLE_GEO_KEY = "AIzaSyC65er4bfy9lOtc1oVQV3zzxemXsCX0K_M"
+    GOOGLE_GEO_KEY = st.secrets.get("GOOGLE_GEO_KEY", os.environ.get("GOOGLE_GEO_KEY", ""))
     ANTHROPIC_API_KEY = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
     COMPETITORS_LIST = ["Pothys", "Marri Retail", "SSKL Ltd", "RS Brothers", "Nalli"]
 
