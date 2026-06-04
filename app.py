@@ -898,6 +898,14 @@ Keep total response under 450 words."""
 
     # ── Auto mode: pre-fetch AI before map renders ─────────────────────────────
     ck = f"{city}_{state}"
+    if mode == "🤖 Auto Recommend" and ANTHROPIC_API_KEY:
+        regen_col, _ = st.columns([1, 4])
+        with regen_col:
+            if st.button("🔄 Regenerate", key=f"regen_{ck}", help="Clear cached recommendation and generate a fresh one"):
+                st.session_state.get("ai_recs_ce", {}).pop(ck, None)
+                st.session_state.get("ai_pins_ce", {}).pop(ck, None)
+                st.rerun()
+
     if mode == "🤖 Auto Recommend" and data["kal_gap"] > 0 and ANTHROPIC_API_KEY:
         if ck not in st.session_state.get("ai_pins_ce", {}):
             with st.spinner(f"Generating AI recommendations for {city}… (~10 sec)"):
