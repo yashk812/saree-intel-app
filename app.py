@@ -715,36 +715,35 @@ elif page == "🔍 Expansion Insights":
 elif page == "🔍 City Explorer":
     import math, requests as req_lib
 
-    GOOGLE_GEO_KEY = st.secrets.get("GOOGLE_GEO_KEY", os.environ.get("GOOGLE_GEO_KEY", ""))
+    GOOGLE_GEO_KEY    = st.secrets.get("GOOGLE_GEO_KEY", os.environ.get("GOOGLE_GEO_KEY", ""))
     ANTHROPIC_API_KEY = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
-    COMPETITORS_LIST = ["Pothys", "Marri Retail", "SSKL Ltd", "RS Brothers", "Nalli"]
+    COMPETITORS_LIST  = ["Pothys", "Marri Retail", "SSKL Ltd", "RS Brothers", "Nalli"]
 
-    st.markdown('<div class="page-title">🔍 City Explorer</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-sub">Deep-dive into archetype cities — PS gap analysis + AI-recommended localities for new Kalyan Silks stores.</div>', unsafe_allow_html=True)
+    st.title("🔍 City Archetype Explorer")
+    st.caption("Deep-dive into representative cities to understand where new Kalyan Silks stores should open.")
 
     ARCHETYPE_CITIES = {
-        "🔴 Bengaluru, KA":       {"City": "Bengaluru",       "State": "Karnataka",       "color": "#C62828"},
-        "🟠 Mysuru, KA":          {"City": "Mysuru",           "State": "Karnataka",       "color": "#E65100"},
-        "🟡 Chennai, TN":         {"City": "Chennai",          "State": "Tamil Nadu",      "color": "#F9A825"},
-        "🟢 Coimbatore, TN":      {"City": "Coimbatore",       "State": "Tamil Nadu",      "color": "#2E7D32"},
-        "🔵 Visakhapatnam, AP":   {"City": "Visakhapatnam",    "State": "Andhra Pradesh",  "color": "#1565C0"},
-        "🟣 Vijayawada, AP":      {"City": "Vijayawada",       "State": "Andhra Pradesh",  "color": "#6A1B9A"},
+        "🔴 Bengaluru, KA":       {"City": "Bengaluru",     "State": "Karnataka",      "color": "#C62828"},
+        "🟠 Mysuru, KA":          {"City": "Mysuru",         "State": "Karnataka",      "color": "#E65100"},
+        "🟡 Chennai, TN":         {"City": "Chennai",        "State": "Tamil Nadu",     "color": "#F9A825"},
+        "🟢 Coimbatore, TN":      {"City": "Coimbatore",     "State": "Tamil Nadu",     "color": "#2E7D32"},
+        "🔵 Visakhapatnam, AP":   {"City": "Visakhapatnam",  "State": "Andhra Pradesh", "color": "#1565C0"},
+        "🟣 Vijayawada, AP":      {"City": "Vijayawada",     "State": "Andhra Pradesh", "color": "#6A1B9A"},
     }
 
     KALYAN_STATES_CE = set(df_india[df_india["Company Name"] == "Kalyan Silks"]["State"].unique())
 
-    # ── State PS map ───────────────────────────────────────────────────────────
     @st.cache_data
-    def get_state_ps():
-        state_pop   = df_india.drop_duplicates(subset=["City","State"]).groupby("State")["pop_2026"].sum().reset_index(name="state_pop")
-        state_total = df_india.groupby("State").size().reset_index(name="state_total")
-        sps = state_pop.merge(state_total, on="State", how="left")
-        sps["state_ps"] = sps["state_pop"] / sps["state_total"]
-        return dict(zip(sps["State"], sps["state_ps"]))
+    def get_state_ps_ce():
+        sp = df_india.drop_duplicates(subset=["City","State"]).groupby("State")["pop_2026"].sum().reset_index(name="sp")
+        st_ = df_india.groupby("State").size().reset_index(name="st")
+        m = sp.merge(st_, on="State", how="left")
+        m["sps"] = m["sp"] / m["st"]
+        return dict(zip(m["State"], m["sps"]))
 
-    state_ps_map_ce = get_state_ps()
+    state_ps_map_ce = get_state_ps_ce()
 
-    def get_city_data(city, state):
+    def get_city_data_ce(city, state):
         city_df  = df_india[(df_india["City"] == city) & (df_india["State"] == state)].copy()
         kal_df   = city_df[city_df["Company Name"] == "Kalyan Silks"]
         comp_df  = city_df[city_df["Company Name"] != "Kalyan Silks"]
@@ -757,289 +756,329 @@ elif page == "🔍 City Explorer":
         share    = 0.8 if state in KALYAN_STATES_CE else 0.5
         kal_gap  = math.ceil(gap * share) if gap > 0 else 0
         comp_bd  = {c: int((city_df["Company Name"] == c).sum()) for c in COMPETITORS_LIST if (city_df["Company Name"] == c).sum() > 0}
-        top_pins = city_df["Pincode"].value_counts().head(5).index.astype(str).tolist()
+        top_pins  = city_df["Pincode"].value_counts().head(5).index.astype(str).tolist()
         comp_pins = comp_df["Pincode"].value_counts().head(10).index.astype(str).tolist()
-        kalyan_pins = kal_df["Pincode"].value_counts().head(5).index.astype(str).tolist()
+        kal_pins  = kal_df["Pincode"].value_counts().head(5).index.astype(str).tolist()
         return {
             "city_df": city_df, "kal_df": kal_df, "comp_df": comp_df,
             "pop": pop, "total": total, "kal_n": kal_n, "sps": sps,
             "needed": needed, "gap": gap, "share": share, "kal_gap": kal_gap,
-            "comp_bd": comp_bd, "top_pins": top_pins, "comp_pins": comp_pins, "kalyan_pins": kalyan_pins,
+            "comp_bd": comp_bd, "top_pins": top_pins, "comp_pins": comp_pins, "kal_pins": kal_pins,
         }
 
-    def google_geocode(address, city, state):
-        """Geocode a specific address via Google Geocoding API."""
-        query = f"{address}, {city}, {state}, India"
-        url = "https://maps.googleapis.com/maps/api/geocode/json"
-        params = {"address": query, "key": GOOGLE_GEO_KEY}
-        try:
-            r = req_lib.get(url, params=params, timeout=8)
-            results = r.json().get("results", [])
-            if results:
-                loc = results[0]["geometry"]["location"]
-                return loc["lat"], loc["lng"], results[0].get("formatted_address","")
-        except Exception as e:
-            pass
-        return None, None, None
+    def get_ai_rec_ce(city, state, data):
+        if "ai_recs_ce" not in st.session_state: st.session_state["ai_recs_ce"] = {}
+        if "ai_pins_ce" not in st.session_state: st.session_state["ai_pins_ce"] = {}
+        ck = f"{city}_{state}"
+        if ck in st.session_state["ai_recs_ce"]:
+            return st.session_state["ai_recs_ce"][ck], st.session_state["ai_pins_ce"].get(ck, [])
 
-    def get_ai_recommendation(city, state, data, archetype_label):
-        """Call Anthropic API — returns (text, list of pin dicts with address+lat+lng)."""
-        if "ai_recs_saree" not in st.session_state:
-            st.session_state["ai_recs_saree"] = {}
-        if "ai_pins_saree" not in st.session_state:
-            st.session_state["ai_pins_saree"] = {}
-        cache_key = f"{city}_{state}"
-        if cache_key in st.session_state["ai_recs_saree"]:
-            return st.session_state["ai_recs_saree"][cache_key], st.session_state["ai_pins_saree"].get(cache_key, [])
-
-        comp_str   = ", ".join([f"{k}: {v} stores" for k, v in data["comp_bd"].items()]) or "None"
-        pop_str    = f"{int(data['pop']):,}" if data["pop"] else "N/A"
-        n_stores   = max(data["kal_gap"], 1)
-        share_pct  = f"{int(data['share']*100)}%"
+        n_stores = max(data["kal_gap"], 1)
+        comp_str = ", ".join([f"{k}: {v} stores" for k, v in data["comp_bd"].items()]) or "None"
+        pop_str  = f"{int(data['pop']):,}" if data["pop"] else "N/A"
 
         prompt = f"""You are a retail expansion analyst for Kalyan Silks, a premium saree and ethnic wear retailer in India.
 
 City: {city}, {state}
 Population (2025 est.): {pop_str}
 State PS ratio: {int(data['sps']):,} people/store
-Total saree stores in city: {data['total']} (Kalyan: {data['kal_n']}, Competitors: {data['total'] - data['kal_n']})
-Stores city should have: {data['needed']} | New Kalyan stores recommended: {n_stores} ({share_pct} of demand gap)
+Total saree stores: {data['total']} (Kalyan: {data['kal_n']}, Competitors: {data['total'] - data['kal_n']})
+Stores city should have: {data['needed']} | New Kalyan stores recommended: {n_stores}
 Competitor breakdown: {comp_str}
 Top pincodes by store density: {', '.join(data['top_pins'])}
 Competitor store pincodes: {', '.join(data['comp_pins'])}
-Existing Kalyan pincodes: {', '.join(data['kalyan_pins']) if data['kalyan_pins'] else 'None'}
+Existing Kalyan pincodes: {', '.join(data['kal_pins']) if data['kal_pins'] else 'None'}
 
-IMPORTANT INSTRUCTIONS:
-1. Write a 2-sentence market opportunity summary mentioning which areas/pincodes have highest competitor density.
-2. Recommend exactly {n_stores} specific localities in {city} for new Kalyan Silks stores.
-3. For EACH recommendation, provide:
-   - A FULL, PRECISE street address (e.g. "Shop 12, Forum Mall, Hosur Road, Koramangala, Bengaluru 560095") — this address will be sent directly to Google Maps Geocoding API, so it MUST be specific enough to return an exact pin. Do NOT use vague descriptions like "near the main market".
-   - 1-sentence reason anchored to competitor presence or footfall in that pincode/area.
-4. Anchor recommendations to competitor pincodes wherever possible — areas with multiple competitor stores have proven saree retail demand.
+IMPORTANT — use competitor pincodes as primary signals. Areas with multiple competitor stores have proven saree retail demand.
 
-Return ONLY valid JSON, no markdown, no explanation:
-{{
-  "summary": "...",
-  "recommendations": [
-    {{"rank": 1, "locality": "Area Name", "address": "Full precise street address, City, State Pincode", "reason": "..."}}
-  ]
-}}"""
+Provide:
+1. A 2-sentence market opportunity summary (mention which pincodes/areas have highest competitor density)
+2. Exactly {n_stores} specific locality recommendations in {city} with brief reasons — anchor to competitor pincodes
+3. Key risks (1-2 lines)
+
+Then on a NEW LINE output exactly this JSON (no markdown, no backticks):
+LOCATIONS_JSON: [{{"area": "ShortName", "full_address": "Locality, {city}, {state}, India PINCODE", "pincode": "XXXXXX"}}]
+
+Rules for LOCATIONS_JSON:
+- List exactly {n_stores} locations
+- "area": short display name (e.g. "Koramangala 5th Block")
+- "full_address": VERY specific, geocodable — include street/landmark + neighbourhood + city + state + India + 6-digit pincode (e.g. "Near Forum Mall, Hosur Road, Koramangala, Bengaluru, Karnataka, India 560095")
+- "pincode": correct 6-digit PIN for that exact locality
+- All locations must be within {city} city limits
+Keep total response under 450 words."""
 
         try:
-            resp = req_lib.post(
+            r = req_lib.post(
                 "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01"},
-                json={"model": "claude-sonnet-4-20250514", "max_tokens": 1500, "messages": [{"role": "user", "content": prompt}]},
+                headers={"Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01"},
+                json={"model": "claude-haiku-4-5-20251001", "max_tokens": 800,
+                      "messages": [{"role": "user", "content": prompt}]},
                 timeout=30,
             )
-            raw = resp.json()["content"][0]["text"]
-            raw = raw.strip()
-            if raw.startswith("```"): raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
-            parsed = json.loads(raw)
-            summary = parsed.get("summary", "")
-            recs    = parsed.get("recommendations", [])
+            full_text = r.json()["content"][0]["text"]
+            rec_text, locations_raw = full_text, []
+            if "LOCATIONS_JSON:" in full_text:
+                parts         = full_text.split("LOCATIONS_JSON:")
+                rec_text      = parts[0].strip()
+                try: locations_raw = json.loads(parts[1].strip())
+                except: locations_raw = []
+            st.session_state["ai_recs_ce"][ck] = rec_text
+
+            # Geocode each via Google
+            pins = []
+            city_df_g = data["city_df"].dropna(subset=["lat","lng"])
+            for loc in locations_raw:
+                area     = loc.get("area", "")
+                address  = loc.get("full_address", f"{area}, {city}, {state}, India")
+                pincode  = loc.get("pincode", "")
+                try:
+                    gr = req_lib.get(
+                        "https://maps.googleapis.com/maps/api/geocode/json",
+                        params={"address": address, "key": GOOGLE_GEO_KEY},
+                        timeout=8
+                    )
+                    results = gr.json().get("results", [])
+                    if results:
+                        loc_g = results[0]["geometry"]["location"]
+                        lat_g, lng_g = float(loc_g["lat"]), float(loc_g["lng"])
+                        if 6.5 <= lat_g <= 37.5 and 67.5 <= lng_g <= 97.5:
+                            pins.append({"area": area, "pincode": pincode, "lat": lat_g, "lng": lng_g})
+                            continue
+                except: pass
+                # fallback: competitor pincode centroid
+                if pincode and not city_df_g.empty:
+                    pr = city_df_g[city_df_g["Pincode"].astype(str) == str(pincode)]
+                    if not pr.empty:
+                        pins.append({"area": area, "pincode": pincode,
+                                     "lat": pr["lat"].mean(), "lng": pr["lng"].mean() + 0.003 * len(pins)})
+
+            # fill remaining from comp_pins centroids
+            if len(pins) < n_stores and not city_df_g.empty:
+                for j, pin in enumerate(data["comp_pins"]):
+                    if len(pins) >= n_stores: break
+                    pr = city_df_g[city_df_g["Pincode"].astype(str) == str(pin)]
+                    if not pr.empty:
+                        pins.append({"area": f"PIN {pin} area", "pincode": pin,
+                                     "lat": pr["lat"].mean(), "lng": pr["lng"].mean() + 0.003 * j})
+
+            st.session_state["ai_pins_ce"][ck] = pins[:n_stores]
+            return rec_text, pins[:n_stores]
+
         except Exception as e:
-            st.session_state["ai_recs_saree"][cache_key] = f"⚠️ AI error: {e}"
-            st.session_state["ai_pins_saree"][cache_key] = []
-            return st.session_state["ai_recs_saree"][cache_key], []
+            err = f"⚠️ Could not generate recommendation: {e}"
+            st.session_state["ai_recs_ce"][ck] = err
+            st.session_state["ai_pins_ce"][ck]  = []
+            return err, []
 
-        # Geocode each recommendation via Google API
-        pins = []
-        for rec in recs:
-            address = rec.get("address", f"{rec.get('locality','')}, {city}, {state}")
-            lat, lng, fmt_addr = google_geocode(address, city, state)
-            pins.append({
-                "rank":     rec.get("rank", len(pins)+1),
-                "locality": rec.get("locality", ""),
-                "address":  fmt_addr or address,
-                "reason":   rec.get("reason", ""),
-                "lat":      lat,
-                "lng":      lng,
-            })
+    # ── City + mode selector ───────────────────────────────────────────────────
+    col_sel, col_mode = st.columns([3, 2])
+    with col_sel:
+        selected_label = st.selectbox("Select a city archetype", list(ARCHETYPE_CITIES.keys()))
+    with col_mode:
+        mode = st.radio("Mode", ["🤖 Auto Recommend", "✏️ Manual Pin Drop"], horizontal=True)
 
-        text_out = f"**Market Summary:**\n{summary}\n\n**Recommended Locations:**\n"
-        for p in pins:
-            text_out += f"\n**{p['rank']}. {p['locality']}**\n📍 {p['address']}\n💡 {p['reason']}\n"
+    cfg   = ARCHETYPE_CITIES[selected_label]
+    city  = cfg["City"]; state = cfg["State"]; color = cfg["color"]
+    data  = get_city_data_ce(city, state)
+    share_lbl = "80% — existing Kalyan state" if data["share"] == 0.8 else "50% — new state for Kalyan"
 
-        st.session_state["ai_recs_saree"][cache_key] = text_out
-        st.session_state["ai_pins_saree"][cache_key] = pins
-        return text_out, pins
+    st.markdown(f"**{city}, {state}**")
+    st.markdown("---")
 
-    # ── City selector ──────────────────────────────────────────────────────────
-    selected_label = st.selectbox("Select archetype city", list(ARCHETYPE_CITIES.keys()))
-    meta  = ARCHETYPE_CITIES[selected_label]
-    city  = meta["City"]
-    state = meta["State"]
-    color = meta["color"]
+    # ── KPI row ────────────────────────────────────────────────────────────────
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Kalyan Stores",       data["kal_n"])
+    k2.metric("Competitor Stores",   data["total"] - data["kal_n"])
+    k3.metric("Population 2025",     f"{int(data['pop']):,}" if data["pop"] else "N/A",
+              help=f"State PS ({state}): {int(data['sps']):,} people/store")
+    k4.metric("Stores Should Have",  data["needed"], help=f"Total market gap: {data['gap']} stores")
+    k5.metric("New Kalyan Stores",   data["kal_gap"], help=share_lbl)
 
-    data  = get_city_data(city, state)
-    share_pct = f"{int(data['share']*100)}%"
-    pop_str   = f"{int(data['pop']):,}" if data["pop"] else "N/A"
-    sps_str   = f"{int(data['sps']):,}" if data["sps"] else "N/A"
+    st.markdown("---")
 
-    # ── City header KPIs ───────────────────────────────────────────────────────
-    st.markdown(f"### 🏙️ {city}, {state}")
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("Population (2025)", pop_str)
-    k2.metric("State PS Ratio", sps_str, help="People per saree store in this state")
-    k3.metric("Total Stores", data["total"])
-    k4.metric("Kalyan Stores", data["kal_n"])
-    k5.metric("Stores City Needs", data["needed"])
-    k6.metric(f"New Kalyan Stores ({share_pct} share)", data["kal_gap"],
-              delta="Existing market" if state in KALYAN_STATES_CE else "New market",
-              delta_color="normal" if state in KALYAN_STATES_CE else "inverse")
+    # ── Auto mode: pre-fetch AI before map renders ─────────────────────────────
+    ck = f"{city}_{state}"
+    if mode == "🤖 Auto Recommend" and data["kal_gap"] > 0 and ANTHROPIC_API_KEY:
+        if ck not in st.session_state.get("ai_pins_ce", {}):
+            with st.spinner(f"Generating AI recommendations for {city}… (~10 sec)"):
+                get_ai_rec_ce(city, state, data)
+            st.rerun()
 
-    tab_ov, tab_ai = st.tabs(["📊 Overview", "🤖 AI Recommendation"])
+    # ── Map + panel layout ─────────────────────────────────────────────────────
+    map_col, panel_col = st.columns([3, 1])
 
-    # ── TAB: OVERVIEW ──────────────────────────────────────────────────────────
-    with tab_ov:
-        col_l, col_r = st.columns([1, 1])
+    with panel_col:
+        st.subheader("🏪 Competitor Breakdown")
+        if data["comp_bd"]:
+            fig_cb = px.bar(
+                x=list(data["comp_bd"].values()),
+                y=list(data["comp_bd"].keys()),
+                orientation="h",
+                color=list(data["comp_bd"].keys()),
+                color_discrete_map={k: COMPANY_COLORS.get(k, "#888") for k in data["comp_bd"]},
+            )
+            fig_cb.update_layout(
+                height=260, showlegend=False,
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
+                font_color="#ccc",
+                yaxis_title=None, xaxis_title="Stores",
+                xaxis=dict(gridcolor="#2a2a3a"), yaxis=dict(gridcolor="#2a2a3a"),
+            )
+            st.plotly_chart(fig_cb, use_container_width=True)
+        else:
+            st.info("No competitor stores in this city.")
 
-        with col_l:
-            st.markdown("#### Competitor breakdown")
-            if data["comp_bd"]:
-                comp_bd_df = pd.DataFrame(list(data["comp_bd"].items()), columns=["Company","Stores"])
-                comp_bd_df["Color"] = comp_bd_df["Company"].map(COMPANY_COLORS)
-                fig_cb = px.bar(comp_bd_df.sort_values("Stores"), x="Stores", y="Company",
-                                orientation="h", color="Company", color_discrete_map=COMPANY_COLORS,
-                                title=f"Competitor stores in {city}")
-                fig_cb.update_layout(
-                    paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
-                    font_color="#ccc", title_font_color="#f5c842",
-                    showlegend=False, height=300,
-                    margin=dict(l=0,r=10,t=40,b=10),
-                    xaxis=dict(gridcolor="#2a2a3a"), yaxis=dict(gridcolor="#2a2a3a"),
-                )
-                st.plotly_chart(fig_cb, use_container_width=True)
+        if mode == "✏️ Manual Pin Drop":
+            st.subheader("📍 Dropped Pins")
+            key_pins = f"dropped_pins_{city}_{state}"
+            if key_pins not in st.session_state:
+                st.session_state[key_pins] = []
+            pins_dropped = st.session_state[key_pins]
+            if pins_dropped:
+                for i, p in enumerate(pins_dropped):
+                    st.markdown(f"{i+1}. `{p['lat']:.4f}, {p['lng']:.4f}`")
+                if st.button("🗑️ Clear all pins"):
+                    st.session_state[key_pins] = []
+                    st.rerun()
             else:
-                st.info("No competitor stores in this city.")
+                st.caption("Click the map to drop pins.")
 
-        with col_r:
-            st.markdown("#### Top pincodes by store density")
-            pin_df = data["city_df"].groupby(["Pincode","Company Name"]).size().reset_index(name="n")
-            pin_summary = pin_df.groupby("Pincode")["n"].sum().reset_index(name="total").sort_values("total", ascending=False).head(8)
-            if not pin_summary.empty:
-                fig_pin = px.bar(pin_summary.sort_values("total"), x="total", y="Pincode",
-                                 orientation="h", title="Top 8 pincodes (all stores)",
-                                 color_discrete_sequence=[color])
-                fig_pin.update_layout(
-                    paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
-                    font_color="#ccc", title_font_color="#f5c842",
-                    showlegend=False, height=300,
-                    margin=dict(l=0,r=10,t=40,b=10),
-                    xaxis=dict(gridcolor="#2a2a3a"), yaxis=dict(gridcolor="#2a2a3a"),
+        elif mode == "🤖 Auto Recommend":
+            ai_pins_panel = st.session_state.get("ai_pins_ce", {}).get(ck, [])
+            if ai_pins_panel:
+                st.subheader("📍 AI Pins")
+                for i, p in enumerate(ai_pins_panel):
+                    st.markdown(f"**{i+1}. {p['area']}**")
+                    st.caption(f"PIN {p['pincode']} · {p['lat']:.4f}, {p['lng']:.4f}")
+            if not ANTHROPIC_API_KEY:
+                st.warning("Add ANTHROPIC_API_KEY to Streamlit secrets.")
+
+    with map_col:
+        city_stores = data["city_df"].dropna(subset=["lat","lng"])
+        center_lat  = city_stores["lat"].mean() if not city_stores.empty else 15.0
+        center_lng  = city_stores["lng"].mean() if not city_stores.empty else 79.0
+
+        m = folium.Map(location=[center_lat, center_lng], zoom_start=13, tiles="CartoDB dark_matter")
+
+        # All competitors — same neutral grey (colour is in bar chart, not map)
+        for _, row in data["comp_df"].dropna(subset=["lat","lng"]).iterrows():
+            folium.CircleMarker(
+                location=[row["lat"], row["lng"]],
+                radius=8, color="#212121", fill=True,
+                fill_color="#616161", fill_opacity=0.85,
+                tooltip=f"⚫ {row['Company Name']}: {row['Store Name']}",
+                popup=folium.Popup(
+                    f"<b>{row['Store Name']}</b><br>{row['Company Name']}<br>PIN: {row['Pincode']}",
+                    max_width=200
                 )
-                st.plotly_chart(fig_pin, use_container_width=True)
+            ).add_to(m)
 
-        # Store map
-        st.markdown("#### Current store locations")
-        city_df_map = data["city_df"].dropna(subset=["lat","lng"])
-        if not city_df_map.empty:
-            m_ov = folium.Map(location=[city_df_map["lat"].mean(), city_df_map["lng"].mean()],
-                              zoom_start=12, tiles="CartoDB dark_matter")
-            for _, row in city_df_map.iterrows():
-                is_kal = row["Company Name"] == "Kalyan Silks"
-                c = COMPANY_COLORS.get(row["Company Name"], "#888")
-                folium.CircleMarker(
-                    location=[row["lat"], row["lng"]],
-                    radius=9 if is_kal else 7,
-                    color=c, fill=True, fill_color=c,
-                    fill_opacity=0.9 if is_kal else 0.65,
-                    weight=3 if is_kal else 1,
-                    tooltip=row["Store Name"],
+        # Kalyan existing — gold
+        for _, row in data["kal_df"].dropna(subset=["lat","lng"]).iterrows():
+            folium.CircleMarker(
+                location=[row["lat"], row["lng"]],
+                radius=10, color="#f5c842", fill=True,
+                fill_color="#f5c842", fill_opacity=1.0,
+                tooltip=f"🥻 Kalyan: {row['Store Name']}",
+                popup=folium.Popup(
+                    f"<b style='color:#f5c842'>{row['Store Name']}</b><br>Kalyan Silks<br>PIN: {row['Pincode']}",
+                    max_width=200
+                )
+            ).add_to(m)
+
+        key_pins = f"dropped_pins_{city}_{state}"
+        if key_pins not in st.session_state:
+            st.session_state[key_pins] = []
+
+        if mode == "✏️ Manual Pin Drop":
+            for i, p in enumerate(st.session_state[key_pins]):
+                folium.Marker(
+                    location=[p["lat"], p["lng"]],
+                    tooltip=f"📍 Proposed store {i+1}",
+                    icon=folium.Icon(color="green", icon="plus", prefix="fa")
+                ).add_to(m)
+            map_data = st_folium(m, width="100%", height=520,
+                                  returned_objects=["last_clicked"],
+                                  key=f"map_{city}_{state}_manual")
+            if map_data and map_data.get("last_clicked"):
+                lc = map_data["last_clicked"]
+                new_pin = {"lat": lc["lat"], "lng": lc["lng"]}
+                if new_pin not in st.session_state[key_pins]:
+                    st.session_state[key_pins].append(new_pin)
+                    st.rerun()
+
+        else:
+            # Auto: drop AI pins
+            ai_pins_map = st.session_state.get("ai_pins_ce", {}).get(ck, [])
+            for i, p in enumerate(ai_pins_map):
+                folium.Marker(
+                    location=[p["lat"], p["lng"]],
+                    tooltip=f"📍 Proposed #{i+1}: {p['area']}",
                     popup=folium.Popup(
-                        f"<b style='color:{c}'>{row['Store Name']}</b><br>{row['Remaining Address']}<br>"
-                        f"📍 {row['City']} {row['Pincode']}<br>🏷️ {row['Brand Name']}",
-                        max_width=260
-                    )
-                ).add_to(m_ov)
-            # Legend
-            legend_html = '<div style="position:fixed;bottom:20px;left:20px;z-index:9999;background:#1e1e2e;border:1px solid #333;border-radius:8px;padding:10px 14px;font-family:sans-serif">' 
-            for co, co_color in COMPANY_COLORS.items():
-                n = int((data["city_df"]["Company Name"] == co).sum())
-                if n: legend_html += f'<div style="margin:3px 0"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{co_color};margin-right:6px"></span><span style="color:#ddd;font-size:11px">{co} ({n})</span></div>'
-            legend_html += '</div>'
-            m_ov.get_root().html.add_child(folium.Element(legend_html))
-            st_folium(m_ov, width="100%", height=460, returned_objects=[])
-        else:
-            st.info("No geocoded stores in this city.")
+                        f"<b style='color:#00E5FF'>📍 Proposed Kalyan #{i+1}</b><br>"
+                        f"<b>{p['area']}</b><br>PIN: {p['pincode']}<br>AI-recommended",
+                        max_width=220
+                    ),
+                    icon=folium.Icon(color="green", icon="plus", prefix="fa")
+                ).add_to(m)
+            st_folium(m, width="100%", height=520,
+                      returned_objects=[], key=f"map_{city}_{state}_auto")
 
-    # ── TAB: AI RECOMMENDATION ─────────────────────────────────────────────────
-    with tab_ai:
-        if not ANTHROPIC_API_KEY:
-            st.warning("Add ANTHROPIC_API_KEY to Streamlit secrets to enable AI recommendations.")
-        else:
-            st.markdown(f"**Asking Claude to recommend the best {data['kal_gap']} location(s) in {city} for new Kalyan Silks stores...**")
-            st.caption("Claude analyses competitor pincodes and footfall signals, then Google Geocoding API pins each recommendation.")
+        # Legend
+        legend_html = """
+        <div style="position:fixed;bottom:20px;left:20px;z-index:9999;background:#1e1e2e;
+                    border:1px solid #333;border-radius:8px;padding:10px 14px;font-family:sans-serif">
+          <div style="margin:3px 0"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f5c842;margin-right:6px"></span><span style="color:#ddd;font-size:11px">Kalyan Silks (existing)</span></div>
+          <div style="margin:3px 0"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#616161;margin-right:6px"></span><span style="color:#ddd;font-size:11px">Competitors</span></div>
+          <div style="margin:3px 0"><span style="color:#4CAF50;font-size:13px;margin-right:6px">✚</span><span style="color:#ddd;font-size:11px">Proposed location</span></div>
+        </div>"""
+        m.get_root().html.add_child(folium.Element(legend_html))
 
-            gen_col, _ = st.columns([1, 3])
-            with gen_col:
-                run_ai = st.button(f"🤖 Generate recommendation", key=f"ai_{city}")
+        # Download
+        st.download_button(
+            "⬇️ Download map as HTML",
+            data=m._repr_html_(),
+            file_name=f"{city}_expansion_plan.html",
+            mime="text/html"
+        )
 
-            cache_key = f"{city}_{state}"
-            already_done = cache_key in st.session_state.get("ai_recs_saree", {})
+    # ── AI recommendation text (below map, full width) ─────────────────────────
+    if mode == "🤖 Auto Recommend":
+        ai_text = st.session_state.get("ai_recs_ce", {}).get(ck, "")
+        if ai_text:
+            st.markdown("---")
+            st.subheader("🤖 AI Recommendation")
+            st.markdown(ai_text)
 
-            if run_ai or already_done:
-                with st.spinner("Generating recommendation & geocoding locations...") if not already_done else st.empty():
-                    ai_text, ai_pins = get_ai_recommendation(city, state, data, selected_label)
+    # ── Pincode reference table ────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("📌 Pincode Reference")
+    pin_rows_tbl = []
+    for pin in data["top_pins"]:
+        pin_s  = data["city_df"][data["city_df"]["Pincode"].astype(str) == str(pin)]
+        kal_c  = int((pin_s["Company Name"] == "Kalyan Silks").sum())
+        comp_c = int((pin_s["Company Name"] != "Kalyan Silks").sum())
+        comps  = ", ".join(sorted(pin_s[pin_s["Company Name"] != "Kalyan Silks"]["Company Name"].unique()))
+        proposed = ""
+        if mode == "🤖 Auto Recommend":
+            ai_pins_t = st.session_state.get("ai_pins_ce", {}).get(ck, [])
+            if any(str(p.get("pincode","")) == str(pin) for p in ai_pins_t):
+                proposed = "✅ AI Proposed"
+        elif mode == "✏️ Manual Pin Drop":
+            if st.session_state.get(f"dropped_pins_{city}_{state}"):
+                proposed = "📍 Manual pins dropped"
+        pin_rows_tbl.append({
+            "Pincode":    pin,
+            "Type":       "🥻 Kalyan Present" if kal_c > 0 else "⚫ Competitors Only",
+            "Kalyan":     kal_c,
+            "Competitors":comp_c,
+            "Companies":  comps,
+            "Status":     proposed,
+        })
+    if pin_rows_tbl:
+        st.dataframe(pd.DataFrame(pin_rows_tbl), use_container_width=True, hide_index=True)
 
-                st.markdown("---")
-                st.markdown(ai_text)
-
-                # Map with AI pins
-                geocoded_pins = [p for p in ai_pins if p.get("lat")]
-                if geocoded_pins or not data["city_df"].dropna(subset=["lat","lng"]).empty:
-                    st.markdown("#### 📍 Recommended locations map")
-                    all_lats = [p["lat"] for p in geocoded_pins if p.get("lat")] + data["city_df"]["lat"].dropna().tolist()
-                    all_lngs = [p["lng"] for p in geocoded_pins if p.get("lng")] + data["city_df"]["lng"].dropna().tolist()
-                    m_ai = folium.Map(
-                        location=[np.mean(all_lats), np.mean(all_lngs)],
-                        zoom_start=12, tiles="CartoDB dark_matter"
-                    )
-
-                    # Existing stores
-                    for _, row in data["city_df"].dropna(subset=["lat","lng"]).iterrows():
-                        is_kal = row["Company Name"] == "Kalyan Silks"
-                        c = COMPANY_COLORS.get(row["Company Name"], "#888")
-                        folium.CircleMarker(
-                            location=[row["lat"], row["lng"]],
-                            radius=7 if is_kal else 5,
-                            color=c, fill=True, fill_color=c,
-                            fill_opacity=0.8 if is_kal else 0.5, weight=1,
-                            tooltip=row["Store Name"],
-                        ).add_to(m_ai)
-
-                    # AI recommended pins
-                    for p in geocoded_pins:
-                        popup_html = f"""
-                        <div style='font-family:sans-serif;min-width:200px'>
-                          <b style='color:#00E5FF'>#{p['rank']}. {p['locality']}</b><br>
-                          📍 {p['address']}<br><br>
-                          💡 {p['reason']}
-                        </div>"""
-                        folium.Marker(
-                            location=[p["lat"], p["lng"]],
-                            popup=folium.Popup(popup_html, max_width=280),
-                            tooltip=f"#{p['rank']} {p['locality']}",
-                            icon=folium.Icon(color="blue", icon="star", prefix="fa"),
-                        ).add_to(m_ai)
-
-                    if geocoded_pins:
-                        n_geo = len(geocoded_pins)
-                        n_total = len(ai_pins)
-                        st.caption(f"📍 {n_geo}/{n_total} locations geocoded via Google Maps API.")
-
-                    legend_ai = '<div style="position:fixed;bottom:20px;left:20px;z-index:9999;background:#1e1e2e;border:1px solid #333;border-radius:8px;padding:10px 14px;font-family:sans-serif">'
-                    legend_ai += '<div style="margin:3px 0"><span style="font-size:14px">⭐</span><span style="color:#00E5FF;font-size:12px;margin-left:6px">AI recommended location</span></div>'
-                    for co, co_color in COMPANY_COLORS.items():
-                        n = int((data["city_df"]["Company Name"] == co).sum())
-                        if n: legend_ai += f'<div style="margin:3px 0"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{co_color};margin-right:6px"></span><span style="color:#ddd;font-size:11px">{co} ({n})</span></div>'
-                    legend_ai += '</div>'
-                    m_ai.get_root().html.add_child(folium.Element(legend_ai))
-                    st_folium(m_ai, width="100%", height=520, returned_objects=[])
-
-                if not geocoded_pins and ai_pins:
-                    st.warning("Google Geocoding API could not resolve any recommended addresses. Check the API key or try regenerating.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
