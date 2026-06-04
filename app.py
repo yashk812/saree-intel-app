@@ -311,207 +311,400 @@ elif page == "📊 Company Stats":
 # PAGE 3: EXPANSION INSIGHTS
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "🔍 Expansion Insights":
+    import math
+
     st.markdown('<div class="page-title">🔍 Expansion Insights</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-sub">Cities where competitors operate but Kalyan Silks has no presence — ranked by opportunity.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-sub">Population/store analysis to identify how many new Kalyan Silks stores each city can absorb.</div>', unsafe_allow_html=True)
 
-    # Score explainer
-    with st.expander("🧮 How the Opportunity Score works", expanded=False):
-        st.markdown("""
-        For each **city**, we calculate:
+    tab_city, tab_state = st.tabs(["🏙️ City Opportunities", "🗺️ State Overview"])
 
-        | Component | Formula |
-        |-----------|---------|
-        | **Competitor Presence** | Count of all non-Kalyan Silks stores in that city |
-        | **Kalyan Silks Presence** | Count of Kalyan Silks stores in that city |
-        | **Adjacency Bonus** | Distinct Kalyan Silks cities within chosen radius (outside this city), capped at max |
-        | **Opportunity Score** | `(Competitor Presence × 10) − (Kalyan Silks Presence × 20) + (Adjacency Bonus × 5)` |
+    # ── Shared computation ─────────────────────────────────────────────────────
+    KALYAN_STATES = set(df_india[df_india["Company Name"] == "Kalyan Silks"]["State"].unique())
 
-        **High score** = lots of competitor activity, little/no Kalyan Silks footprint.
-        **Adjacency bonus** surfaces cities near existing Kalyan Silks cities — logical expansion steps. One point per nearby Kalyan city (not per store).
-        """)
+    # City-level aggregation
+    city_agg = df_india.groupby(["City", "State"]).agg(
+        total_stores   = ("Store Name", "count"),
+        kalyan_stores  = ("Company Name", lambda x: (x == "Kalyan Silks").sum()),
+        pop_2026       = ("pop_2026", "first"),
+        lat            = ("lat", "mean"),
+        lng            = ("lng", "mean"),
+        district       = ("District", lambda x: x.mode()[0] if len(x) > 0 else ""),
+    ).reset_index()
 
-    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 1, 1, 1])
-    with col_f1:
-        sel_states3 = st.multiselect("Filter States", FOCUS_STATES, placeholder="All states", key="ins_state")
-    with col_f2:
-        top_n = st.slider("Top N cities", 5, 40, 20)
-    with col_f3:
-        radius_km = st.slider("Adjacency radius (km)", 25, 300, 100, step=25)
-    with col_f4:
-        adj_cap = st.slider("Adjacency cap", 1, 10, 5)
+    comp_stores = df_india[df_india["Company Name"] != "Kalyan Silks"].groupby(["City","State"]).size().reset_index(name="competitor_stores")
+    comp_names  = df_india[df_india["Company Name"] != "Kalyan Silks"].groupby(["City","State"])["Company Name"].apply(
+        lambda x: ", ".join(sorted(x.unique()))
+    ).reset_index(name="competitors_present")
+    top_pins_agg = df_india.groupby(["City","State"])["Pincode"].apply(
+        lambda x: ", ".join(x.value_counts().head(3).index.astype(str).tolist())
+    ).reset_index(name="top_pincodes")
+    comp_pins_agg = df_india[df_india["Company Name"] != "Kalyan Silks"].groupby(["City","State"])["Pincode"].apply(
+        lambda x: ", ".join(x.value_counts().head(3).index.astype(str).tolist())
+    ).reset_index(name="comp_pincodes")
 
-    idf = df_india[df_india["State"].isin(sel_states3)] if sel_states3 else df_india.copy()
+    city_agg = city_agg.merge(comp_stores,    on=["City","State"], how="left")
+    city_agg = city_agg.merge(comp_names,     on=["City","State"], how="left")
+    city_agg = city_agg.merge(top_pins_agg,   on=["City","State"], how="left")
+    city_agg = city_agg.merge(comp_pins_agg,  on=["City","State"], how="left")
+    city_agg["competitor_stores"] = city_agg["competitor_stores"].fillna(0).astype(int)
 
-    kalyan = idf[idf["Company Name"] == "Kalyan Silks"].copy()
-    competitors = idf[idf["Company Name"] != "Kalyan Silks"].copy()
-    kalyan_cities = set(kalyan["City"].str.lower().unique())
+    # ── State PS ratios ────────────────────────────────────────────────────────
+    # State PS = state urban pop (sum of city pops in dataset) / total stores in state
+    state_pop = df_india.drop_duplicates(subset=["City","State"]).groupby("State")["pop_2026"].sum().reset_index(name="state_urban_pop_2026")
+    state_stores = df_india.groupby("State").size().reset_index(name="state_total_stores")
+    state_ps_df = state_pop.merge(state_stores, on="State", how="left")
+    state_ps_df["state_ps"] = state_ps_df["state_urban_pop_2026"] / state_ps_df["state_total_stores"]
+    state_ps_map = dict(zip(state_ps_df["State"], state_ps_df["state_ps"]))
 
-    # Build city-level score table
-    city_comp = competitors.groupby(["City", "State"]).size().reset_index(name="Competitor Stores")
-    city_kalyan = kalyan.groupby("City").size().reset_index(name="Kalyan Silks Stores")
-    city_kalyan["City_lower"] = city_kalyan["City"].str.lower()
+    # Focus-wide fallback avg
+    has_pop = city_agg[city_agg["pop_2026"].notna()]
+    focus_avg_ps = float(has_pop["pop_2026"].sum() / has_pop["total_stores"].sum()) if len(has_pop) > 0 else 100000.0
 
-    city_comp["has_kalyan"] = city_comp["City"].str.lower().isin(kalyan_cities)
-    city_comp["Kalyan Silks Stores"] = city_comp["City"].str.lower().map(
-        city_kalyan.set_index("City_lower")["Kalyan Silks Stores"]
-    ).fillna(0).astype(int)
+    city_agg["state_ps"]      = city_agg["State"].map(state_ps_map).fillna(focus_avg_ps)
+    city_agg["city_ps"]       = (city_agg["pop_2026"] / city_agg["total_stores"]).round(0)
+    city_agg["stores_needed"] = (city_agg["pop_2026"] / city_agg["state_ps"]).round(0).fillna(0).clip(lower=1).astype(int)
+    city_agg["gap_stores"]    = (city_agg["stores_needed"] - city_agg["total_stores"]).clip(lower=0).fillna(0).astype(int)
 
-    # Haversine adjacency bonus — one point per nearby Kalyan CITY (not per store)
-    kalyan_city_coords = kalyan.groupby("City")[["lat", "lng"]].mean().reset_index()
+    def kalyan_stores_to_open(row):
+        gap = row["gap_stores"]
+        if gap == 0: return 0
+        share = 0.8 if row["State"] in KALYAN_STATES else 0.5
+        return math.ceil(gap * share)
 
-    def adjacency_bonus(city_row):
-        """Count distinct Kalyan Silks cities within radius_km, capped at adj_cap."""
-        city_coords_row = idf[idf["City"] == city_row["City"]][["lat", "lng"]].mean()
-        if pd.isna(city_coords_row["lat"]):
-            return 0
-        clat, clng = np.radians(city_coords_row["lat"]), np.radians(city_coords_row["lng"])
-        bonus = 0
-        for _, kr in kalyan_city_coords.iterrows():
-            if kr["City"].lower() == city_row["City"].lower():
-                continue
-            klat, klng = np.radians(kr["lat"]), np.radians(kr["lng"])
-            dlat, dlng = klat - clat, klng - clng
-            a = np.sin(dlat/2)**2 + np.cos(clat) * np.cos(klat) * np.sin(dlng/2)**2
-            dist = 6371 * 2 * np.arcsin(np.sqrt(a))
-            if dist <= radius_km:
-                bonus += 1
-        return min(bonus, adj_cap)
+    city_agg["kalyan_stores_to_open"] = city_agg.apply(kalyan_stores_to_open, axis=1)
+    city_agg["kalyan_share_pct"]      = city_agg["State"].apply(lambda s: "80%" if s in KALYAN_STATES else "50%")
 
-    city_comp["Adjacency Bonus"] = city_comp.apply(adjacency_bonus, axis=1)
-    city_comp["Opportunity Score"] = (
-        city_comp["Competitor Stores"] * 10
-        - city_comp["Kalyan Silks Stores"] * 20
-        + city_comp["Adjacency Bonus"] * 5
+    # Tier: distance to nearest Kalyan city
+    kalyan_locs = df_india[df_india["Company Name"] == "Kalyan Silks"].dropna(subset=["lat","lng"])
+    kalyan_lats = kalyan_locs["lat"].values
+    kalyan_lngs = kalyan_locs["lng"].values
+    kalyan_city_names = kalyan_locs["City"].values
+
+    def haversine_km(lat1, lng1, lats2, lngs2):
+        r = 6371
+        dlat = np.radians(lats2 - lat1)
+        dlng = np.radians(lngs2 - lng1)
+        a = np.sin(dlat/2)**2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lats2)) * np.sin(dlng/2)**2
+        return r * 2 * np.arcsin(np.sqrt(a))
+
+    def get_tier(row):
+        if row["kalyan_stores"] > 0: return "P0 (Kalyan present)", row["City"], 0
+        if pd.isna(row["lat"]) or pd.isna(row["lng"]): return "P3 (>200km)", None, None
+        dists = haversine_km(row["lat"], row["lng"], kalyan_lats, kalyan_lngs)
+        idx = dists.argmin(); d = round(float(dists[idx]))
+        tier = "P1 (<100km)" if d < 100 else ("P2 (100-200km)" if d < 200 else "P3 (>200km)")
+        return tier, kalyan_city_names[idx], d
+
+    city_agg[["tier","nearest_kalyan","nearest_kalyan_km"]] = city_agg.apply(
+        lambda r: pd.Series(get_tier(r)), axis=1
     )
-    city_comp = city_comp.sort_values("Opportunity Score", ascending=False)
 
-    white_space = city_comp[~city_comp["has_kalyan"]].head(top_n).copy()
+    # ── TAB 1: CITY OPPORTUNITIES ──────────────────────────────────────────────
+    with tab_city:
+        st.caption(f"Each city benchmarked against its **state PS ratio** (state urban pop ÷ state total saree stores). Focus avg: **{int(focus_avg_ps):,}** people/store.")
 
-    # ── Charts row ─────────────────────────────────────────────────────────────
-    col_ins1, col_ins2 = st.columns([3, 2])
+        with st.expander("🧮 How it works", expanded=False):
+            st.markdown(f"""
+            **Focus States Avg PS** = Total pop (all focus state cities) ÷ Total stores = **{int(focus_avg_ps):,} people/store**
 
-    with col_ins1:
-        st.markdown("#### 🟡 White Space Cities")
-        if len(white_space) == 0:
-            st.info("No white-space cities found for selected filters.")
+            | Metric | Formula |
+            |--------|---------|
+            | **State PS ratio** | Sum of city pops in state ÷ total saree stores in state |
+            | **City PS ratio** | City pop ÷ all saree stores in city (Kalyan + competitors) |
+            | **Stores city should have** | `round(city pop ÷ state PS ratio)` |
+            | **Gap stores** | `max(0, should have − existing)` — total market gap |
+            | **Kalyan stores to open** | Existing Kalyan state → 80% of gap · New state → 50% of gap (both rounded up) |
+            | **Tier** | P0 = Kalyan present · P1 = <100km · P2 = 100-200km · P3 = >200km from nearest Kalyan city |
+
+            Population: Census of India 2011 extrapolated to 2025 using state-level urban CAGRs.
+            """)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            filter_states = st.multiselect("State", FOCUS_STATES, default=[], key="ins_state", placeholder="All focus states")
+        with c2:
+            filter_tier = st.multiselect("Tier", ["P0 (Kalyan present)","P1 (<100km)","P2 (100-200km)","P3 (>200km)"],
+                                          default=["P1 (<100km)","P2 (100-200km)"], key="ins_tier")
+        with c3:
+            min_gap = st.slider("Min Kalyan stores to open", 0, 10, 0, key="ins_mingap")
+
+        idf_city = city_agg.copy()
+        if filter_states: idf_city = idf_city[idf_city["State"].isin(filter_states)]
+        if filter_tier:   idf_city = idf_city[idf_city["tier"].isin(filter_tier)]
+        idf_city = idf_city[idf_city["kalyan_stores_to_open"] >= min_gap]
+        idf_city = idf_city.sort_values("kalyan_stores_to_open", ascending=False).reset_index(drop=True)
+        idf_city.index += 1
+
+        # State PS reference cards
+        active_states = filter_states if filter_states else FOCUS_STATES
+        ps_cards = state_ps_df[state_ps_df["State"].isin(active_states)].sort_values("state_ps")
+        if not ps_cards.empty:
+            st.markdown("**State PS Ratios (benchmark):**")
+            cols_ps = st.columns(min(len(ps_cards), 6))
+            for i, (_, r) in enumerate(ps_cards.iterrows()):
+                with cols_ps[i % len(cols_ps)]:
+                    st.metric(
+                        label=r["State"].replace("Andhra Pradesh","AP").replace("Maharashtra","MH"),
+                        value=f"{int(r['state_ps']):,}",
+                        help=f"Urban pop: {int(r['state_urban_pop_2026']):,} ÷ {int(r['state_total_stores'])} stores"
+                    )
+
+        # State summary cards
+        state_summary = idf_city.groupby("State").agg(
+            proposed=("kalyan_stores_to_open","sum"),
+            num_cities=("City","count"),
+        ).reset_index().merge(state_ps_df[["State","state_ps"]], on="State", how="left")
+        if not state_summary.empty:
+            st.markdown("**Proposed new Kalyan stores by state:**")
+            cols_ss = st.columns(min(len(state_summary), 5))
+            for i, (_, sr) in enumerate(state_summary.iterrows()):
+                with cols_ss[i % len(cols_ss)]:
+                    pct = "80%" if sr["State"] in KALYAN_STATES else "50%"
+                    st.metric(
+                        label=f"🏙️ {sr['State']}",
+                        value=f"{int(sr['proposed'])} new stores",
+                        delta=f"{int(sr['num_cities'])} cities | PS {int(sr['state_ps']):,}",
+                        delta_color="off",
+                        help=f"Kalyan share: {pct} of total demand gap"
+                    )
+
+        # Bar chart
+        top10 = idf_city.head(10)
+        if not top10.empty:
+            fig_bar = px.bar(top10[::-1], x="kalyan_stores_to_open", y="City",
+                             orientation="h", color="State",
+                             title="Top 10 Cities — Kalyan Silks Stores to Open",
+                             labels={"kalyan_stores_to_open":"Stores to Open","City":"City"})
+            fig_bar.update_layout(
+                paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
+                font_color="#ccc", title_font_color="#f5c842",
+                xaxis=dict(gridcolor="#2a2a3a"), yaxis=dict(gridcolor="#2a2a3a"),
+                height=380, margin=dict(l=0,r=20,t=40,b=20)
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # Table
+        st.subheader(f"📋 City Opportunities ({len(idf_city)} shown)")
+        display_cols = {
+            "City":"City", "State":"State", "district":"District", "tier":"Tier",
+            "kalyan_stores_to_open":"Kalyan Stores to Open",
+            "gap_stores":"Total Gap", "kalyan_share_pct":"Kalyan Share %",
+            "kalyan_stores":"Kalyan Stores (now)", "total_stores":"Total Stores",
+            "stores_needed":"Stores Should Have",
+            "pop_2026":"Pop 2025 (est.)", "city_ps":"City PS Ratio",
+            "competitor_stores":"Competitor Stores", "competitors_present":"Competitors",
+            "nearest_kalyan":"Nearest Kalyan City", "nearest_kalyan_km":"Distance (km)",
+            "comp_pincodes":"Top Competitor PINs",
+        }
+        show = idf_city[[c for c in display_cols if c in idf_city.columns]].rename(columns=display_cols).copy()
+        for col in ["Pop 2025 (est.)","City PS Ratio"]:
+            if col in show.columns:
+                show[col] = show[col].apply(lambda x: int(x) if pd.notna(x) else None)
+
+        def hl_stores(val):
+            if val is None: return ""
+            try:
+                n = int(val)
+                if n >= 5:  return "background-color: #ff9999; color: #000; font-weight: bold"
+                if n >= 2:  return "background-color: #ffe066; color: #000; font-weight: bold"
+                if n == 1:  return "background-color: #d4f0a0; color: #000"
+            except: pass
+            return ""
+
+        try:
+            styled = show.style.map(hl_stores, subset=["Kalyan Stores to Open"])
+        except Exception:
+            styled = show.style.applymap(hl_stores, subset=["Kalyan Stores to Open"])
+
+        st.dataframe(styled, use_container_width=True, height=520,
+                     column_config={
+                         "Pop 2025 (est.)":      st.column_config.NumberColumn(format="%d"),
+                         "City PS Ratio":        st.column_config.NumberColumn(format="%d"),
+                         "Kalyan Stores to Open":st.column_config.NumberColumn(format="%d"),
+                         "Total Gap":            st.column_config.NumberColumn(format="%d"),
+                         "Stores Should Have":   st.column_config.NumberColumn(format="%d"),
+                         "Distance (km)":        st.column_config.NumberColumn(format="%d"),
+                     })
+
+        # Map
+        st.subheader("🗺️ Opportunity Map")
+        st.caption("Bubble size = Kalyan stores to open. Red=P1, Orange=P2, Grey=P3. Gold = existing Kalyan.")
+        map_df = idf_city[idf_city["kalyan_stores_to_open"] > 0].dropna(subset=["lat","lng"]).copy()
+
+        if not map_df.empty:
+            m2 = folium.Map(location=[map_df["lat"].mean(), map_df["lng"].mean()],
+                            zoom_start=5, tiles="CartoDB dark_matter")
+            max_val = max(map_df["kalyan_stores_to_open"].max(), 1)
+            tier_color = {"P0 (Kalyan present)":"#f5c842","P1 (<100km)":"#e63946",
+                          "P2 (100-200km)":"#FF9800","P3 (>200km)":"#9E9E9E"}
+
+            comp_pincode_map = df_india[df_india["Company Name"] != "Kalyan Silks"].groupby(["City","Pincode"]).size().reset_index(name="stores")
+
+            for _, row in map_df.iterrows():
+                val   = int(row["kalyan_stores_to_open"])
+                r_sz  = max(5, int(val / max_val * 28))
+                color = tier_color.get(row["tier"], "#e63946")
+                pop_s = f"{int(row['pop_2026']):,}" if pd.notna(row.get("pop_2026")) else "N/A"
+                ps_s  = f"{int(row['city_ps']):,}" if pd.notna(row.get("city_ps")) else "N/A"
+                sps_s = f"{int(row['state_ps']):,}" if pd.notna(row.get("state_ps")) else "N/A"
+
+                city_pins = comp_pincode_map[comp_pincode_map["City"] == row["City"]].sort_values("stores", ascending=False).head(5)
+                pin_rows_html = "".join(
+                    f"<tr><td style='padding:1px 8px 1px 0;color:#ccc'>{p['Pincode']}</td>"
+                    f"<td style='color:#f5c842;font-weight:600'>{p['stores']} store{'s' if p['stores']>1 else ''}</td></tr>"
+                    for _, p in city_pins.iterrows()
+                )
+                pin_section = (
+                    f"<hr style='margin:4px 0'>"
+                    f"<div style='font-size:11px;color:#aaa'>Top competitor pincodes:</div>"
+                    f"<table style='font-size:12px;margin-top:2px'>{pin_rows_html}</table>"
+                ) if not city_pins.empty else ""
+
+                popup_html = f"""
+                <div style='font-family:sans-serif;min-width:230px'>
+                  <b style='font-size:14px'>🏙️ {row["City"]}, {row["State"]}</b><br>
+                  <span style='color:{color}'><b>{row["tier"]}</b></span><br>
+                  <hr style='margin:4px 0'>
+                  🆕 <b>Kalyan stores to open: {val}</b> (gap: {int(row.get("gap_stores",0))}, share: {row.get("kalyan_share_pct","?")})<br>
+                  🏪 Existing: {int(row["total_stores"])} total (Kalyan: {int(row["kalyan_stores"])})<br>
+                  👥 Pop 2025: {pop_s}<br>
+                  📐 City PS: {ps_s} | State PS: {sps_s}<br>
+                  🏪 Competitors: {int(row.get("competitor_stores",0))}<br>
+                  📍 Nearest Kalyan: {row.get("nearest_kalyan","N/A")} ({row.get("nearest_kalyan_km","?")} km)
+                  {pin_section}
+                </div>"""
+
+                folium.CircleMarker(
+                    location=[row["lat"], row["lng"]],
+                    radius=r_sz, color=color, fill=True,
+                    fill_color=color, fill_opacity=0.75,
+                    popup=folium.Popup(popup_html, max_width=270),
+                    tooltip=f"{row['City']}: {val} stores to open ({row['tier']})",
+                ).add_to(m2)
+
+            # Existing Kalyan stores
+            kalyan_cluster = MarkerCluster(name="Kalyan Silks Existing").add_to(m2)
+            for _, row in kalyan_locs.iterrows():
+                folium.CircleMarker(
+                    location=[row["lat"], row["lng"]],
+                    radius=7, color="#f5c842", fill=True, fill_color="#f5c842", fill_opacity=1.0,
+                    tooltip=f"✅ {row['Store Name']}",
+                    popup=folium.Popup(
+                        f"<b style='color:#f5c842'>{row['Store Name']}</b><br>{row['City']}, {row['State']}<br>PIN: {row['Pincode']}",
+                        max_width=220),
+                ).add_to(kalyan_cluster)
+
+            folium.LayerControl().add_to(m2)
+            st_folium(m2, width="100%", height=580, returned_objects=[])
         else:
-            fig_opp = px.bar(
-                white_space, x="Opportunity Score", y="City",
-                orientation="h", color="State",
-                title=f"Top {top_n} Opportunity Cities",
-                hover_data=["Competitor Stores", "Adjacency Bonus", "State"]
-            )
-            fig_opp.update_layout(
-                paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
-                font_color="#ccc", title_font_color="#f5c842",
-                yaxis=dict(autorange="reversed", gridcolor="#2a2a3a"),
-                xaxis=dict(gridcolor="#2a2a3a"),
-                margin=dict(l=10, r=10, t=40, b=10),
-                showlegend=True, height=max(300, top_n * 22)
-            )
-            st.plotly_chart(fig_opp, use_container_width=True)
+            st.info("No cities match current filters.")
 
-    with col_ins2:
-        st.markdown("#### 📊 Competitor breakdown in top cities")
-        if len(white_space) > 0:
-            top_cities = white_space.head(15)["City"].tolist()
-            comp_breakdown = competitors[competitors["City"].isin(top_cities)].groupby(
-                ["City", "Company Name"]
-            ).size().reset_index(name="count")
-            fig_bd = px.bar(comp_breakdown, x="count", y="City", color="Company Name",
-                            orientation="h", color_discrete_map=COMPANY_COLORS,
-                            title="Who's in those cities")
-            fig_bd.update_layout(
-                paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
-                font_color="#ccc", title_font_color="#f5c842",
-                yaxis=dict(autorange="reversed", gridcolor="#2a2a3a"),
-                xaxis=dict(gridcolor="#2a2a3a"),
-                margin=dict(l=10, r=10, t=40, b=10),
-                height=max(300, 15 * 22)
-            )
-            st.plotly_chart(fig_bd, use_container_width=True)
+    # ── TAB 2: STATE OVERVIEW ──────────────────────────────────────────────────
+    with tab_state:
+        st.caption("State-level summary — where Kalyan operates today vs where we're proposing to enter.")
 
-    # ── Detailed table ─────────────────────────────────────────────────────────
-    st.markdown("#### 📋 Detailed opportunity table")
-    disp = white_space[["City", "State", "Competitor Stores", "Kalyan Silks Stores", "Adjacency Bonus", "Opportunity Score"]].copy()
+        COMPETITORS = ["Pothys","Marri Retail","SSKL Ltd","RS Brothers","Nalli"]
 
-    # Add top 3 pincodes column
-    comp_pincode = competitors.groupby(["City", "Pincode"]).size().reset_index(name="n")
-    def top_pins(city):
-        pins = comp_pincode[comp_pincode["City"] == city].sort_values("n", ascending=False).head(3)
-        return ", ".join(f"{r['Pincode']} ({r['n']})" for _, r in pins.iterrows())
-    disp["Top Pincodes (competitor count)"] = disp["City"].apply(top_pins)
+        bk_by_state   = df_india[df_india["Company Name"]=="Kalyan Silks"].groupby("State").size().reset_index(name="kalyan_stores_current")
+        prop_by_state = city_agg.groupby("State").agg(
+            kalyan_stores_proposed=("kalyan_stores_to_open","sum"),
+            total_gap=("gap_stores","sum"),
+        ).reset_index()
 
-    st.dataframe(disp.reset_index(drop=True), use_container_width=True, height=350)
+        comp_counts = {}
+        for comp in COMPETITORS:
+            comp_counts[comp] = df_india[df_india["Company Name"]==comp].groupby("State").size().reset_index(name=comp)
 
-    # ── Map ────────────────────────────────────────────────────────────────────
-    st.markdown("#### 🗺️ Opportunity map")
-    m2 = folium.Map(location=[15.0, 79.0], zoom_start=6, tiles="CartoDB dark_matter")
-
-    for _, row in kalyan.iterrows():
-        folium.CircleMarker(
-            location=[row["lat"], row["lng"]],
-            radius=10, color="#f5c842", fill=True, fill_color="#f5c842",
-            fill_opacity=0.9, weight=2,
-            tooltip=f"✅ {row['Store Name']}",
-            popup=folium.Popup(
-                f"<b style='color:#f5c842'>{row['Store Name']}</b><br>📍 {row['City']}, {row['State']} — {row['Pincode']}",
-                max_width=250
-            )
-        ).add_to(m2)
-
-    city_coords_map = idf.groupby("City")[["lat","lng"]].mean().to_dict("index")
-
-    # Pre-compute top pincodes per city from competitor data
-    comp_pincode = competitors.groupby(["City", "Pincode"]).size().reset_index(name="stores")
-
-    for _, row in white_space.iterrows():
-        city = row["City"]
-        if city not in city_coords_map:
-            continue
-        clat = city_coords_map[city]["lat"]
-        clng = city_coords_map[city]["lng"]
-        score = row["Opportunity Score"]
-        radius = max(6, min(22, score / 4))
-
-        # Top 5 pincodes in this city by competitor store count
-        city_pins = comp_pincode[comp_pincode["City"] == city].sort_values("stores", ascending=False).head(5)
-        pin_rows = "".join(
-            f"<tr><td style='padding:2px 8px 2px 0;color:#ccc'>{p['Pincode']}</td>"
-            f"<td style='padding:2px 0;color:#f5c842;font-weight:600'>{p['stores']} store{'s' if p['stores']>1 else ''}</td></tr>"
-            for _, p in city_pins.iterrows()
+        state_tab = state_ps_df[["State","state_urban_pop_2026","state_ps"]].copy()
+        state_tab = state_tab.merge(bk_by_state,   on="State", how="left")
+        state_tab = state_tab.merge(prop_by_state, on="State", how="left")
+        state_tab["kalyan_stores_current"]  = state_tab["kalyan_stores_current"].fillna(0).astype(int)
+        state_tab["kalyan_stores_proposed"] = state_tab["kalyan_stores_proposed"].fillna(0).astype(int)
+        state_tab["total_gap"]              = state_tab["total_gap"].fillna(0).astype(int)
+        state_tab["kalyan_total_proposed"]  = state_tab["kalyan_stores_current"] + state_tab["kalyan_stores_proposed"]
+        state_tab["kalyan_share"]           = state_tab["State"].apply(lambda s: "80%" if s in KALYAN_STATES else "50%")
+        state_tab["status"]                 = state_tab["kalyan_stores_current"].apply(
+            lambda x: "🟡 Existing Market" if x > 0 else "🔵 New Market"
         )
-        pin_html = (
-            f"<br><div style='margin-top:6px;font-size:11px;color:#aaa'>Top pincodes (by competitor density):</div>"
-            f"<table style='margin-top:3px;font-size:12px'>{pin_rows}</table>"
-        ) if not city_pins.empty else ""
+        for comp in COMPETITORS:
+            state_tab = state_tab.merge(comp_counts[comp], on="State", how="left")
+            state_tab[comp] = state_tab[comp].fillna(0).astype(int)
+        state_tab["total_competitor_stores"] = state_tab[COMPETITORS].sum(axis=1).astype(int)
+        state_tab = state_tab.sort_values("kalyan_stores_proposed", ascending=False).reset_index(drop=True)
+        state_tab.index += 1
 
-        folium.CircleMarker(
-            location=[clat, clng],
-            radius=radius,
-            color="#e63946", fill=True, fill_color="#e63946",
-            fill_opacity=0.55, weight=1,
-            tooltip=f"🎯 {city} — score {score}",
-            popup=folium.Popup(
-                f"<div style='font-family:sans-serif;min-width:200px'>"
-                f"<b style='color:#e63946;font-size:14px'>{city}</b>, {row['State']}<br><br>"
-                f"Competitor stores: <b>{row['Competitor Stores']}</b><br>"
-                f"Kalyan Silks stores: <b>{row['Kalyan Silks Stores']}</b><br>"
-                f"Adjacency bonus: <b>{row['Adjacency Bonus']}</b><br>"
-                f"Opportunity score: <b>{score}</b>"
-                f"{pin_html}</div>",
-                max_width=280
-            )
-        ).add_to(m2)
+        # KPIs
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Focus States", len(state_tab))
+        k2.metric("Existing Kalyan Markets", int((state_tab["kalyan_stores_current"]>0).sum()))
+        k3.metric("New Markets", int((state_tab["kalyan_stores_current"]==0).sum()))
+        k4.metric("Total New Kalyan Stores Proposed", int(state_tab["kalyan_stores_proposed"].sum()))
+        st.markdown("---")
 
-    m2.get_root().html.add_child(folium.Element("""
-    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:#1e1e2e;
-                border:1px solid #333;border-radius:8px;padding:12px 16px;font-family:sans-serif">
-      <div style="margin:4px 0"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#f5c842;margin-right:8px"></span><span style="color:#ddd;font-size:12px">Kalyan Silks (existing)</span></div>
-      <div style="margin:4px 0"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#e63946;margin-right:8px"></span><span style="color:#ddd;font-size:12px">Opportunity cities (size = score)</span></div>
-    </div>"""))
+        # Bar chart
+        fig_s = px.bar(
+            state_tab.sort_values("kalyan_stores_proposed"),
+            x="kalyan_stores_proposed", y="State", orientation="h",
+            color="status",
+            color_discrete_map={"🟡 Existing Market":"#f5c842","🔵 New Market":"#1565C0"},
+            title="Proposed New Kalyan Silks Stores by State",
+            labels={"kalyan_stores_proposed":"New Stores","State":"State"}
+        )
+        fig_s.update_layout(
+            paper_bgcolor="#0f0f14", plot_bgcolor="#1e1e2e",
+            font_color="#ccc", title_font_color="#f5c842",
+            xaxis=dict(gridcolor="#2a2a3a"), yaxis=dict(gridcolor="#2a2a3a"),
+            height=420, margin=dict(l=0,r=20,t=40,b=20)
+        )
+        st.plotly_chart(fig_s, use_container_width=True)
 
-    st_folium(m2, width="100%", height=550, returned_objects=[])
+        # Table
+        st.subheader("📋 State Overview")
+        disp_state = {
+            "State":"State", "status":"Status",
+            "kalyan_stores_current":"Kalyan Stores (now)",
+            "total_gap":"Total Demand Gap", "kalyan_share":"Kalyan Share %",
+            "kalyan_stores_proposed":"New Kalyan Stores",
+            "kalyan_total_proposed":"Kalyan Total (after)",
+            "state_urban_pop_2026":"Urban Pop 2025 (est.)",
+            "state_ps":"State PS Ratio",
+            "total_competitor_stores":"Total Competitor Stores",
+        }
+        for comp in COMPETITORS:
+            disp_state[comp] = comp
+
+        show_s = state_tab[[c for c in disp_state if c in state_tab.columns]].rename(columns=disp_state).copy()
+
+        def hl_status(val):
+            if "Existing" in str(val): return "background-color: #2a2200; color: #f5c842"
+            if "New" in str(val):      return "background-color: #0d1e3a; color: #64b5f6"
+            return ""
+
+        def hl_proposed(val):
+            if val is None: return ""
+            try:
+                n = int(val)
+                if n >= 20: return "background-color: #ff9999; color: #000; font-weight: bold"
+                if n >= 5:  return "background-color: #ffe066; color: #000; font-weight: bold"
+            except: pass
+            return ""
+
+        try:
+            styled_s = show_s.style.map(hl_status, subset=["Status"]).map(hl_proposed, subset=["New Kalyan Stores"])
+        except Exception:
+            styled_s = show_s.style.applymap(hl_status, subset=["Status"]).applymap(hl_proposed, subset=["New Kalyan Stores"])
+
+        st.dataframe(styled_s, use_container_width=True, height=500,
+                     column_config={
+                         "Urban Pop 2025 (est.)":    st.column_config.NumberColumn(format="%d"),
+                         "State PS Ratio":           st.column_config.NumberColumn(format="%d"),
+                         "Kalyan Stores (now)":      st.column_config.NumberColumn(format="%d"),
+                         "Total Demand Gap":         st.column_config.NumberColumn(format="%d"),
+                         "New Kalyan Stores":        st.column_config.NumberColumn(format="%d"),
+                         "Kalyan Total (after)":     st.column_config.NumberColumn(format="%d"),
+                         "Total Competitor Stores":  st.column_config.NumberColumn(format="%d"),
+                         **{comp: st.column_config.NumberColumn(format="%d") for comp in COMPETITORS},
+                     })
 
 
 # ══════════════════════════════════════════════════════════════════════════════
