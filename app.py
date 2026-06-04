@@ -966,7 +966,7 @@ Keep total response under 450 words."""
             folium.CircleMarker(
                 location=[row["lat"], row["lng"]],
                 radius=8, color="#212121", fill=True,
-                fill_color="#616161", fill_opacity=0.85,
+                fill_color="#B0BEC5", fill_opacity=0.95,
                 tooltip=f"⚫ {row['Company Name']}: {row['Store Name']}",
                 popup=folium.Popup(
                     f"<b>{row['Store Name']}</b><br>{row['Company Name']}<br>PIN: {row['Pincode']}",
