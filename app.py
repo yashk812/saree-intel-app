@@ -93,12 +93,13 @@ df, data_source = load_data()
 
 # ── Company / brand config ─────────────────────────────────────────────────────
 COMPANY_COLORS = {
-    "Kalyan Silks": "#f5c842",   # Gold — target
-    "Pothys":        "#e63946",
-    "Marri Retail":  "#2196F3",
-    "SSKL Ltd":      "#00BCD4",
-    "RS Brothers":   "#FF9800",
-    "Nalli":         "#9C27B0",
+    "Kalyan Silks":      "#f5c842",   # Gold — target
+    "Pothys":            "#e63946",
+    "Marri Retail":      "#2196F3",
+    "SSKL Ltd":          "#00BCD4",
+    "RS Brothers":       "#FF9800",
+    "Nalli":             "#9C27B0",
+    "The Chennai Silks": "#4CAF50",
 }
 
 # Focus on domestic India states only (exclude international)
@@ -349,17 +350,29 @@ elif page == "🔍 Expansion Insights":
     city_agg = city_agg.merge(comp_pins_agg,  on=["City","State"], how="left")
     city_agg["competitor_stores"] = city_agg["competitor_stores"].fillna(0).astype(int)
 
-    # ── State PS ratios ────────────────────────────────────────────────────────
-    # State PS = state urban pop (sum of city pops in dataset) / total stores in state
-    state_pop = df_india.drop_duplicates(subset=["City","State"]).groupby("State")["pop_2026"].sum().reset_index(name="state_urban_pop_2026")
+    # ── State PS ratios — official Census 2011 state urban populations ────────
+    # Using actual state-level urban totals from Census 2011, NOT sum of cities in dataset
+    STATE_URBAN_POP_2026 = {
+        "Tamil Nadu":      46239787,
+        "Karnataka":       33967919,
+        "Kerala":          19688115,
+        "Andhra Pradesh":  38712021,
+        "Telangana":       18668761,
+        "Maharashtra":     68206243,
+        "Gujarat":         35369759,
+        "Delhi":           22037102,
+        "Puducherry":       1280776,
+    }
     state_stores = df_india.groupby("State").size().reset_index(name="state_total_stores")
-    state_ps_df = state_pop.merge(state_stores, on="State", how="left")
+    state_ps_df = state_stores.copy()
+    state_ps_df["state_urban_pop_2026"] = state_ps_df["State"].map(STATE_URBAN_POP_2026)
     state_ps_df["state_ps"] = state_ps_df["state_urban_pop_2026"] / state_ps_df["state_total_stores"]
     state_ps_map = dict(zip(state_ps_df["State"], state_ps_df["state_ps"]))
 
-    # Focus-wide fallback avg
-    has_pop = city_agg[city_agg["pop_2026"].notna()]
-    focus_avg_ps = float(has_pop["pop_2026"].sum() / has_pop["total_stores"].sum()) if len(has_pop) > 0 else 100000.0
+    # Focus-wide fallback avg (total urban pop / total stores)
+    total_urban = sum(STATE_URBAN_POP_2026.get(s, 0) for s in state_ps_df["State"])
+    total_stores_all = state_ps_df["state_total_stores"].sum()
+    focus_avg_ps = float(total_urban / total_stores_all) if total_stores_all > 0 else 100000.0
 
     city_agg["state_ps"]      = city_agg["State"].map(state_ps_map).fillna(focus_avg_ps)
     city_agg["city_ps"]       = (city_agg["pop_2026"] / city_agg["total_stores"]).round(0)
@@ -604,7 +617,7 @@ elif page == "🔍 Expansion Insights":
     with tab_state:
         st.caption("State-level summary — where Kalyan operates today vs where we're proposing to enter.")
 
-        COMPETITORS = ["Pothys","Marri Retail","SSKL Ltd","RS Brothers","Nalli"]
+        COMPETITORS = ["Pothys","Marri Retail","SSKL Ltd","RS Brothers","Nalli","The Chennai Silks"]
 
         bk_by_state   = df_india[df_india["Company Name"]=="Kalyan Silks"].groupby("State").size().reset_index(name="kalyan_stores_current")
         prop_by_state = city_agg.groupby("State").agg(
@@ -717,7 +730,7 @@ elif page == "🔍 City Explorer":
 
     GOOGLE_GEO_KEY    = st.secrets.get("GOOGLE_GEO_KEY", os.environ.get("GOOGLE_GEO_KEY", ""))
     ANTHROPIC_API_KEY = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
-    COMPETITORS_LIST  = ["Pothys", "Marri Retail", "SSKL Ltd", "RS Brothers", "Nalli"]
+    COMPETITORS_LIST  = ["Pothys", "Marri Retail", "SSKL Ltd", "RS Brothers", "Nalli", "The Chennai Silks"]
 
     st.title("🔍 City Archetype Explorer")
     st.caption("Deep-dive into representative cities to understand where new Kalyan Silks stores should open.")
@@ -735,11 +748,20 @@ elif page == "🔍 City Explorer":
 
     @st.cache_data
     def get_state_ps_ce():
-        sp = df_india.drop_duplicates(subset=["City","State"]).groupby("State")["pop_2026"].sum().reset_index(name="sp")
+        STATE_URBAN_POP_2026_CE = {
+            "Tamil Nadu":      46239787,
+            "Karnataka":       33967919,
+            "Kerala":          19688115,
+            "Andhra Pradesh":  38712021,
+            "Telangana":       18668761,
+            "Maharashtra":     68206243,
+            "Gujarat":         35369759,
+            "Delhi":           22037102,
+            "Puducherry":       1280776,
+        }
         st_ = df_india.groupby("State").size().reset_index(name="st")
-        m = sp.merge(st_, on="State", how="left")
-        m["sps"] = m["sp"] / m["st"]
-        return dict(zip(m["State"], m["sps"]))
+        st_["sps"] = st_["State"].map(STATE_URBAN_POP_2026_CE) / st_["st"]
+        return dict(zip(st_["State"], st_["sps"]))
 
     state_ps_map_ce = get_state_ps_ce()
 
