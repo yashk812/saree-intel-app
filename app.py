@@ -737,12 +737,9 @@ elif page == "🔍 City Explorer":
     st.caption("Deep-dive into representative cities to understand where new Kalyan Silks stores should open.")
 
     ARCHETYPE_CITIES = {
-        "🔴 Bengaluru, KA":       {"City": "Bengaluru",     "State": "Karnataka",      "color": "#C62828"},
-        "🟠 Mysuru, KA":          {"City": "Mysuru",         "State": "Karnataka",      "color": "#E65100"},
-        "🟡 Chennai, TN":         {"City": "Chennai",        "State": "Tamil Nadu",     "color": "#F9A825"},
-        "🟢 Coimbatore, TN":      {"City": "Coimbatore",     "State": "Tamil Nadu",     "color": "#2E7D32"},
-        "🔵 Visakhapatnam, AP":   {"City": "Visakhapatnam",  "State": "Andhra Pradesh", "color": "#1565C0"},
-        "🟣 Vijayawada, AP":      {"City": "Vijayawada",     "State": "Andhra Pradesh", "color": "#6A1B9A"},
+        "🔴 Hyderabad, TS":   {"City": "Hyderabad", "State": "Telangana",   "color": "#C62828"},
+        "🟡 Bengaluru, KA":   {"City": "Bengaluru", "State": "Karnataka",   "color": "#F9A825"},
+        "🔵 Chennai, TN":     {"City": "Chennai",   "State": "Tamil Nadu",  "color": "#1565C0"},
     }
 
     KALYAN_STATES_CE = set(df_india[df_india["Company Name"] == "Kalyan Silks"]["State"].unique())
