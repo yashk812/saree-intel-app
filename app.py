@@ -352,6 +352,7 @@ elif page == "🔍 Expansion Insights":
 
     # ── State PS ratios — official Census 2011 state urban populations ────────
     # Using actual state-level urban totals from Census 2011, NOT sum of cities in dataset
+    # Official Census 2011 urban pop extrapolated to 2026 using state-level urban CAGRs
     STATE_URBAN_POP_2026 = {
         "Tamil Nadu":      46239787,
         "Karnataka":       33967919,
@@ -748,6 +749,7 @@ elif page == "🔍 City Explorer":
 
     @st.cache_data
     def get_state_ps_ce():
+        # Official Census 2011 urban pop extrapolated to 2026 using state-level urban CAGRs
         STATE_URBAN_POP_2026_CE = {
             "Tamil Nadu":      46239787,
             "Karnataka":       33967919,
